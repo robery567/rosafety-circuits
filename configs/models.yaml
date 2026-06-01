@@ -1,0 +1,60 @@
+# Paper 4 model registry
+#
+# Three roles:
+#   - sae_anchor:  model with pretrained SAEs (Gemma Scope) for H1e.
+#   - anchor:      cross-architecture models shared with Paper 3 (probes+patching).
+#   - judge:       behavioral refusal labeling (reused from Paper 2).
+#
+# All anchors have published Paper 2 behavioral baselines, so every mechanistic
+# number can be correlated against a real measured cross-lingual gap.
+
+sae_anchor:
+  - id: google/gemma-2-2b-it
+    short: gemma-2-2b
+    family: gemma2
+    params: 2B
+    n_blocks: 26
+    # Gemma Scope JumpReLU SAEs — pretrained, all layers. No SAE training cost.
+    sae:
+      repo_pt: google/gemma-scope-2b-pt-res     # base-model residual SAEs (all layers)
+      repo_it: google/gemma-scope-2b-it-res     # instruction-tuned (verify coverage week 1)
+      hook: resid_post
+      width: 16k                                 # default; ablate a second width in nb04
+    paper2_gap: {ro_refusal: 0.31, en_refusal: 0.93}   # placeholder — confirm from Paper 2 results
+
+anchors:
+  - id: Qwen/Qwen2.5-3B-Instruct
+    short: qwen2.5-3b
+    family: qwen2.5
+    params: 3B
+    n_blocks: 36
+    paper2_baseline: {tox: 0.333, jb: 0.330, xl: 0.222}
+    paper3_probe: ../paper3-alignment/data/probes/qwen2.5-3b/selected_blocks.json
+
+  - id: meta-llama/Llama-3.2-3B-Instruct
+    short: llama-3.2-3b
+    family: llama
+    params: 3B
+    n_blocks: 28
+    paper2_baseline: {tox: 0.161, jb: 0.237, xl: 0.160}
+    paper3_probe: ../paper3-alignment/data/probes/llama-3.2-3b/selected_blocks.json
+
+# Behavioral refusal judge — match Paper 2/3 exactly for cross-paper consistency.
+judge:
+  primary: openai/gpt-5-mini
+  second_rater: anthropic/claude-opus-4.5
+  second_rater_subset_size: 200
+  via: openrouter
+
+# Activation capture + generation params — match Paper 2/3 exactly.
+capture:
+  position: last_assistant_prefix     # see EXPERIMENT_DESIGN §1, matches Paper 3
+  dtype: bfloat16
+  blocks: all
+  ablation_positions: [mean_prompt, last_prompt_token]   # off by default
+  ablation_sublayers: [attn_out, mlp_out]                # off by default
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.0      # greedy / deterministic for capture + behavioral labels
+  top_p: 1.0

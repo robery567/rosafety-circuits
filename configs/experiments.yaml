@@ -1,0 +1,67 @@
+# Paper 4 experiment configurations
+#
+# Locked at week 1 before the first causal (patching) run. The band-definition
+# procedure (§4.3 of EXPERIMENT_DESIGN) is read off EN in-language curves only,
+# *before* any Romanian transfer number is computed — pre-registered to kill
+# the circularity objection.
+
+contrastive_sets:
+  cells:
+    harm_en:   {lang: en, intent: harmful, n: 250, source: "harmbench + paper2_en_ablation"}
+    benign_en: {lang: en, intent: benign,  n: 250, source: "paper2_overrefusal_en + alpaca_clean"}
+    harm_ro:   {lang: ro, intent: harmful, n: 250, source: "rosafetybench_tox_jb_native"}
+    benign_ro: {lang: ro, intent: benign,  n: 250, source: "rosafetybench_overrefusal"}
+    parallel:  {lang: en_ro, intent: harmful, n: 86, source: "rosafetybench_crosslingual_pairs", role: patching_only}
+  balance: 0.5                 # 50/50 harm/benign within each language
+  freeze: true                 # SHA-256 recorded before first causal run
+
+probes:
+  family: logreg               # default; ablate {diff_in_means, mlp}
+  regularization_cv: [0.01, 0.1, 1.0, 10.0]
+  cv_folds: 5
+  standardize: true
+  train_split: 0.7             # EN only
+  # detection: harm vs benign (construction label)
+  # execution: refuse vs comply (behavioral label, gpt-5-mini judged)
+  bands:
+    saturation_fraction: 0.95  # band starts where EN in-language acc hits 95% of max
+    read_off: en_in_language   # never RO — pre-registered (§4.3)
+
+patching:
+  direction: ro_from_en        # replace RO residual with matched EN residual
+  position: last_assistant_prefix
+  granularity: whole_residual  # ablate {refusal_dir_only, detection_dir_only}
+  pair_filter: ro_comply_and_en_refuse   # only gap-exhibiting pairs
+  layer_sweep: all
+  controls:
+    benign_to_benign: true     # C1 — must NOT induce refusal
+    mismatched_harmful: true   # C2 — different harmful prompt
+    random_direction: true     # C3 — matched-norm random vector
+    reverse_en_from_ro: true   # C4 — noising: does removing EN signal break EN refusal?
+  bootstrap_resamples: 2000
+  seeds: [17, 1729, 65537]
+
+sae:
+  enabled_for: [gemma-2-2b]    # H1e is Gemma-only (corroboration)
+  top_features_per_class: 50
+  separation_metric: difference_in_means
+  firing_threshold: 0.0        # JumpReLU is already thresholded
+  width_ablation: [16k, 65k]   # conclusion must survive width choice
+
+paper3_crossref:
+  selected_blocks:
+    qwen2.5-3b: ../paper3-alignment/data/probes/qwen2.5-3b/selected_blocks.json
+    llama-3.2-3b: ../paper3-alignment/data/probes/llama-3.2-3b/selected_blocks.json
+  confirmatory_dpo:
+    reuse_notebook: ../paper3-alignment/experiments/03_train_rd_dpo.ipynb
+    reuse_eval: ../paper3-alignment/experiments/04_eval_safety.ipynb
+    target_blocks: detection_band   # override Paper 3's refusal-direction top-k
+    k: 4                            # matched to Paper 3
+    seeds_pilot: [17]
+    seeds_full: [17, 1729, 65537]   # only if pilot promising
+
+reporting:
+  ci: wilson_95                # probe accuracies
+  patch_ci: bootstrap_95
+  correlation: spearman_exact  # mechanistic-vs-behavioral (Paper 2 R1 lesson)
+  min_seeds: 3

@@ -1,0 +1,41 @@
+# Core ML stack — pin compatible with Paper 2/3 where possible
+torch>=2.4
+transformers>=4.51   # native Gemma-2/3, Qwen-2.5, Llama-3.2 support
+accelerate>=0.34
+bitsandbytes>=0.44
+datasets>=3.0
+
+# Mechanistic interpretability tooling
+transformer-lens>=2.9     # activation patching / hook points (model coverage checked week 1)
+sae-lens>=4.0             # Gemma Scope SAE loading (H1e)
+nnsight>=0.3              # fallback patching interface if TransformerLens coverage is thin
+
+# Probing + stats
+scikit-learn>=1.4         # logistic-regression probes, 5-fold CV
+scipy>=1.11               # Wilson CIs, Spearman exact-distribution, permutation tests
+numpy>=1.24
+pandas>=2.0
+
+# LLM judge harness (reused from Paper 2 src/)
+openai>=1.40              # OpenRouter wrapper
+tenacity>=9.0
+diskcache>=5.6
+
+# Single confirmatory DPO run reuses Paper 3 (H1d) — only needed in notebook 05
+trl>=0.11
+peft>=0.13
+torchao>=0.16
+
+# Data + viz
+pyyaml>=6.0
+tqdm>=4.66
+jsonlines>=4.0
+matplotlib>=3.8
+seaborn>=0.13
+
+# Experiment tracking
+wandb>=0.18
+
+# Release
+huggingface_hub>=0.25
+zenodo-client>=0.3
