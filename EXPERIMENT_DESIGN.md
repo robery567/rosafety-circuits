@@ -245,7 +245,7 @@ Following Paper 2/3 discipline:
 - **Zenodo** — contrastive sets (CC BY 4.0), probe weights + standardizers,
   SAE feature indices, patching restoration tensors, judge labels, response
   JSONs, `bands.json`.
-- **Hugging Face** — `rosafety-interp/contrastive-v1` dataset; probe + feature
+- **Hugging Face** — `rosafety-circuits/contrastive-v1` dataset; probe + feature
   artefacts; reproducibility notebooks.
 - **GitHub** — code, harness, configs, datasheet. `manuscript/` excluded.
 - Anonymized at submission; public IDs at camera-ready.
