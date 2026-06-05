@@ -30,7 +30,7 @@ PIP = r"""%%capture
     'scikit-learn>=1.4' \
     'transformer-lens>=2.9' \
     'sae-lens>=4.0' \
-    huggingface_hub ipywidgets pyyaml matplotlib seaborn -q
+    python-dotenv requests huggingface_hub ipywidgets pyyaml matplotlib seaborn -q
 """
 
 BOOTSTRAP = r"""import os, json, gc, sys, hashlib
@@ -41,6 +41,23 @@ import torch
 # --- Drive ---
 from google.colab import drive
 drive.mount("/content/drive")
+
+# --- Secrets (Colab) -> env, so the Paper 2 judge + gated HF models work
+#     end-to-end with no manual steps. Set these in Colab -> Secrets first. ---
+try:
+    from google.colab import userdata
+    for _k in ("OPENROUTER_API_KEY", "HF_TOKEN"):
+        try:
+            _v = userdata.get(_k)
+            if _v:
+                os.environ[_k] = _v
+        except Exception:
+            print(f"[secrets] {_k} not set in Colab Secrets — add it if a cell needs it.")
+except Exception:
+    pass
+if os.environ.get("HF_TOKEN"):
+    from huggingface_hub import login
+    login(os.environ["HF_TOKEN"], add_to_git_credential=False)
 
 # --- Paths ---
 DRIVE_ROOT  = Path("/content/drive/MyDrive/PhD/paper4-interpretability")
@@ -60,7 +77,7 @@ for d in [CONTRAST_DIR, ACT_DIR, PROBE_DIR, SPLITS_DIR, RESULTS_DIR, FIG_DIR, LO
 
 # --- Reuse Paper 2 judge harness + Paper 3 helpers; Paper 4 src/ ---
 sys.path.insert(0, str(PAPER2_ROOT / "src"))      # judges.py, llm_judge.py
-sys.path.insert(0, str(DRIVE_ROOT / "src"))        # paths, capture, probes, patching, sae_utils
+sys.path.insert(0, str(DRIVE_ROOT / "src"))        # paths, capture, probes, patching, sae_utils, contrastive, behavioral
 
 # --- A100 sanity ---
 assert torch.cuda.is_available(), "Need a GPU runtime (A100 high-RAM)."
@@ -152,28 +169,44 @@ NOTEBOOKS = [
                      "cfg = yaml.safe_load((DRIVE_ROOT / 'configs' / 'experiments.yaml').read_text())\n"
                      "cells_cfg = cfg['contrastive_sets']['cells']\n"
                      "cells_cfg"),
-            ("md", "## Build all cells (EN cells need HarmBench + XSTest from HF)\n\n"
-                   "On Colab `datasets` + network are available, so pass `with_en=True` to\n"
-                   "build the EN cells too. The RO cells + parallel + harm_en core are\n"
-                   "deterministic from the committed Paper 2 files (already frozen locally;\n"
-                   "SHA-256 in `PREREGISTRATION.md`)."),
-            ("code", "from contrastive import build_all\n"
+            ("md", "## 1. Build all cells (EN cells pull HarmBench + XSTest from HF)\n\n"
+                   "`with_en=True` builds the EN cells too (needs `datasets` + network — fine on\n"
+                   "Colab). RO cells + parallel + harm_en core are deterministic from the committed\n"
+                   "Paper 2 files (already frozen locally; SHA-256 in `PREREGISTRATION.md`)."),
+            ("code", "from contrastive import build_all, make_probe_split\n"
                      "expanded = PAPER2_ROOT / 'benchmark' / 'expanded'\n"
                      "out = CONTRAST_DIR / short\n"
-                     "manifest = build_all(expanded, out, with_en=True)  # with_en builds HarmBench+XSTest\n"
-                     "import pprint; pprint.pprint(manifest)"),
-            ("md", "## Behavioral labels (execution-probe target) — Paper 2 judge"),
-            ("code", "from llm_judge import LLMJudge   # Paper 2 src/\n"
-                     "from judges import REFUSAL_JUDGE  # Paper 2 src/\n"
-                     "# Greedy-generate one completion per prompt (all cells), judge refuse/comply.\n"
-                     "# Record finish_reason + usage.{completion,reasoning}_tokens (R10 lesson).\n"
-                     "# Write labels to data/contrastive/<short>/behavioral_labels.jsonl.\n"),
-            ("md", "## Freeze probe split + pre-register (append to PREREGISTRATION.md)"),
-            ("code", "import json\n"
-                     "# 70/30 EN train/eval split (stable, seed 17) over harm_en+benign_en;\n"
-                     "# RO eval = harm_ro+benign_ro; parallel is patching-only.\n"
-                     "# Write data/splits/probe_split.json + record its SHA-256.\n"
-                     "# Append the finalized harm_en/benign_en + split SHAs to PREREGISTRATION.md §3.\n"),
+                     "manifest = build_all(expanded, out, with_en=True)\n"
+                     "import pprint; pprint.pprint(manifest['cells'])"),
+            ("md", "## 2. Load the anchor (for behavioral generation)"),
+            ("code", "from transformers import AutoModelForCausalLM, AutoTokenizer\n"
+                     "tok = AutoTokenizer.from_pretrained(ANCHOR)\n"
+                     "tok.padding_side = 'left'\n"
+                     "if tok.pad_token is None: tok.pad_token = tok.eos_token\n"
+                     "model = AutoModelForCausalLM.from_pretrained(ANCHOR, torch_dtype=torch.bfloat16, device_map='cuda').eval()\n"
+                     "print('loaded', ANCHOR)"),
+            ("md", "## 3. Behavioral labels (execution-probe target) — Paper 2 judge\n\n"
+                   "Greedy one completion per prompt, judged refuse/comply by `gpt-5-mini`\n"
+                   "(same protocol as Paper 2/3). Idempotent via the judge's on-disk cache."),
+            ("code", "from llm_judge import Judge          # Paper 2 src/\n"
+                     "from behavioral import behavioral_labels_for_cells, gap_exhibiting_pairs\n"
+                     "judge = Judge(model=cfg.get('judge', {}).get('primary', 'openai/gpt-5-mini')\n"
+                     "              if isinstance(cfg.get('judge'), dict) else 'openai/gpt-5-mini')\n"
+                     "labels_path = behavioral_labels_for_cells(model, tok, judge, out)\n"
+                     "print('wrote', labels_path)\n"
+                     "print(f'judge calls={judge.total_calls} cache_hits={judge.total_cache_hits}')"),
+            ("md", "## 4. Gap-exhibiting pairs (RO comply + EN refuse) → H1c patching set"),
+            ("code", "pairs = gap_exhibiting_pairs(labels_path)\n"
+                     "print(f'{len(pairs)} / {manifest[\"cells\"][\"parallel\"][\"n\"]} parallel pairs exhibit the gap')\n"
+                     "if len(pairs) < 15:\n"
+                     "    print('WARNING: thin patching set — consider adding the bias subset (EXPERIMENT_LOG 2026-06-01).')"),
+            ("md", "## 5. Freeze probe split + record SHA-256 (append to PREREGISTRATION.md §3)"),
+            ("code", "split = make_probe_split(out)\n"
+                     "print(f\"train_en={len(split['train_en'])} eval_en={len(split['eval_en'])} eval_ro={len(split['eval_ro'])}\")\n"
+                     "print('probe_split sha256:', split['_sha256'])\n"
+                     "print('harm_en sha256 :', manifest['cells']['harm_en']['sha256'])\n"
+                     "print('benign_en sha256:', manifest['cells']['benign_en']['sha256'])\n"
+                     "print('\\n>> Append these three SHA-256s to PREREGISTRATION.md section 3 with today\\'s date.')"),
         ],
     ),
     (

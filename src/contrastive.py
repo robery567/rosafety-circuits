@@ -179,6 +179,43 @@ def build_all(expanded: Path, out_dir: Path, *, with_en: bool = False,
     return manifest
 
 
+def make_probe_split(out_dir: Path, train_frac: float = 0.7, seed: int = SEED) -> dict:
+    """Freeze the probe split (EXPERIMENT_DESIGN sec 2.3) and record SHA-256s.
+
+    EN train = ``train_frac`` of (harm_en + benign_en), class-stratified.
+    EN eval  = the remaining EN (in-language ceiling).
+    RO eval  = all of (harm_ro + benign_ro) (transfer target).
+    parallel = patching-only (not in any probe split).
+
+    Deterministic: stable sort by id, fixed RNG. Writes
+    ``data/splits/probe_split.json`` under the anchor dir's parent / splits.
+    """
+    def _ids(cell, label):
+        path = out_dir / f"{cell}.jsonl"
+        rows = _read_jsonl(path) if path.exists() else []
+        return sorted(r["id"] for r in rows if r["label"] == label)
+
+    rng = random.Random(seed)
+    split = {"train_frac": train_frac, "seed": seed, "train_en": [], "eval_en": [], "eval_ro": []}
+    for cell, label in [("harm_en", "harmful"), ("benign_en", "benign")]:
+        ids = _ids(cell, label)
+        k = int(round(train_frac * len(ids)))
+        train = set(rng.sample(ids, k)) if ids else set()
+        split["train_en"] += sorted(train)
+        split["eval_en"] += sorted(i for i in ids if i not in train)
+    split["eval_ro"] = _ids("harm_ro", "harmful") + _ids("benign_ro", "benign")
+    split["train_en"].sort(); split["eval_en"].sort()
+
+    splits_dir = out_dir.parent.parent / "splits"
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    short = out_dir.name
+    path = splits_dir / f"probe_split_{short}.json"
+    path.write_text(json.dumps(split, indent=2))
+    split["_sha256"] = sha256_of(path)
+    split["_path"] = str(path)
+    return split
+
+
 # Known-benign EN strings that must never appear in a harmful cell (regression
 # guard against the crosslingual expected_behavior corruption).
 _BENIGN_CANARIES = ("Sziget Festival", "capital of Romania", "make polenta", "ciorba")
