@@ -7,13 +7,15 @@
 
 contrastive_sets:
   cells:
-    harm_en:   {lang: en, intent: harmful, n: 250, source: "harmbench + paper2_en_ablation"}
-    benign_en: {lang: en, intent: benign,  n: 250, source: "paper2_overrefusal_en + alpaca_clean"}
-    harm_ro:   {lang: ro, intent: harmful, n: 250, source: "rosafetybench_tox_jb_native"}
-    benign_ro: {lang: ro, intent: benign,  n: 250, source: "rosafetybench_overrefusal"}
-    parallel:  {lang: en_ro, intent: harmful, n: 86, source: "rosafetybench_crosslingual_pairs", role: patching_only}
+    harm_en:   {lang: en, intent: harmful, n: 250, source: "crosslingual_en core (36) + harmbench topup", discriminator: "category==harmful"}
+    benign_en: {lang: en, intent: benign,  n: 250, source: "xstest_safe (benign-but-risky, matches overrefusal)"}
+    harm_ro:   {lang: ro, intent: harmful, n: 100, source: "rosafetybench_toxicity+jailbreak (expected_behavior==refuse)"}
+    benign_ro: {lang: ro, intent: benign,  n: 100, source: "rosafetybench_overrefusal (expected_behavior==answer)"}
+    parallel:  {lang: en_ro, intent: harmful, n: 36, source: "rosafetybench_crosslingual category==harmful", role: patching_only}
   balance: 0.5                 # 50/50 harm/benign within each language
-  freeze: true                 # SHA-256 recorded before first causal run
+  freeze: true                 # SHA-256 recorded in PREREGISTRATION.md before first causal run
+  # NOTE: the crosslingual `expected_behavior` field is corrupted for benign rows
+  # (22/25 benign mislabeled 'refuse'); discriminate on `category` / id-prefix.
 
 probes:
   family: logreg               # default; ablate {diff_in_means, mlp}

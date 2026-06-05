@@ -144,30 +144,36 @@ NOTEBOOKS = [
          "(EXPERIMENT_DESIGN §11).\n\n**Output:** `data/contrastive/<short>/*.jsonl`, "
          "`data/splits/probe_split.json`, both SHA-256'd."),
         [
-            ("md", "## Sources\n\n- `harm_en`: HarmBench standard + Paper 2 EN translated-ablation set.\n"
-                   "- `benign_en`: Paper 2 over-refusal EN + Alpaca-cleaned sample.\n"
+            ("md", "## Sources\n\n- `harm_en`: HarmBench standard + local core from crosslingual `text_en`.\n"
+                   "- `benign_en`: XSTest-safe (matches RO over-refusal benign-but-risky semantics).\n"
                    "- `harm_ro` / `benign_ro`: RoSafetyBench (`paper2-benchmark/benchmark/expanded/`).\n"
-                   "- `parallel`: RoSafetyBench cross-lingual 86 parallel pairs (patching-only)."),
+                   "- `parallel`: RoSafetyBench crosslingual harmful pairs (`category=='harmful'`, patching-only)."),
             ("code", "import yaml\n"
                      "cfg = yaml.safe_load((DRIVE_ROOT / 'configs' / 'experiments.yaml').read_text())\n"
                      "cells_cfg = cfg['contrastive_sets']['cells']\n"
                      "cells_cfg"),
-            ("md", "## Build cells (read Paper 2 prompts from Drive)"),
-            ("code", "# Load RoSafetyBench prompts shipped with Paper 2; map dimensions -> cells.\n"
-                     "# RO harmful   <- toxicity + jailbreak (culturally native)\n"
-                     "# RO benign    <- overrefusal\n"
-                     "# parallel     <- crosslingual parallel pairs\n"
-                     "# EN sets      <- HarmBench standard + Paper 2 EN ablation / Alpaca-clean\n"),
-            ("md", "## Behavioral labels (execution probe) — Paper 2 judge"),
-            ("code", "from llm_judge import LLMJudge  # Paper 2 src/\n"
+            ("md", "## Build all cells (EN cells need HarmBench + XSTest from HF)\n\n"
+                   "On Colab `datasets` + network are available, so pass `with_en=True` to\n"
+                   "build the EN cells too. The RO cells + parallel + harm_en core are\n"
+                   "deterministic from the committed Paper 2 files (already frozen locally;\n"
+                   "SHA-256 in `PREREGISTRATION.md`)."),
+            ("code", "from contrastive import build_all\n"
+                     "expanded = PAPER2_ROOT / 'benchmark' / 'expanded'\n"
+                     "out = CONTRAST_DIR / short\n"
+                     "manifest = build_all(expanded, out, with_en=True)  # with_en builds HarmBench+XSTest\n"
+                     "import pprint; pprint.pprint(manifest)"),
+            ("md", "## Behavioral labels (execution-probe target) — Paper 2 judge"),
+            ("code", "from llm_judge import LLMJudge   # Paper 2 src/\n"
                      "from judges import REFUSAL_JUDGE  # Paper 2 src/\n"
-                     "# Greedy-generate one completion per prompt, judge refuse/comply.\n"
-                     "# Record finish_reason + usage.{completion,reasoning}_tokens (R10 lesson).\n"),
-            ("md", "## Freeze + pre-register (SHA-256)"),
-            ("code", "def sha256_of(path):\n"
-                     "    return hashlib.sha256(Path(path).read_bytes()).hexdigest()\n"
-                     "# Write each cell to data/contrastive/<short>/<cell>.jsonl, then record SHA-256\n"
-                     "# of every cell + the probe split into data/splits/probe_split.json.\n"),
+                     "# Greedy-generate one completion per prompt (all cells), judge refuse/comply.\n"
+                     "# Record finish_reason + usage.{completion,reasoning}_tokens (R10 lesson).\n"
+                     "# Write labels to data/contrastive/<short>/behavioral_labels.jsonl.\n"),
+            ("md", "## Freeze probe split + pre-register (append to PREREGISTRATION.md)"),
+            ("code", "import json\n"
+                     "# 70/30 EN train/eval split (stable, seed 17) over harm_en+benign_en;\n"
+                     "# RO eval = harm_ro+benign_ro; parallel is patching-only.\n"
+                     "# Write data/splits/probe_split.json + record its SHA-256.\n"
+                     "# Append the finalized harm_en/benign_en + split SHAs to PREREGISTRATION.md §3.\n"),
         ],
     ),
     (

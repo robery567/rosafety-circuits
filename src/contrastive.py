@@ -1,0 +1,201 @@
+"""Build + freeze the Paper 4 contrastive sets (EXPERIMENT_DESIGN sec 2).
+
+Five cells per anchor:
+  harm_ro   : RO harmful   <- RoSafetyBench toxicity + jailbreak (culturally native)
+  benign_ro : RO benign    <- RoSafetyBench overrefusal (benign-but-risky-looking)
+  harm_en   : EN harmful   <- HarmBench standard (+ local core from crosslingual text_en)
+  benign_en : EN benign    <- XSTest *safe* split (matches overrefusal semantics)
+  parallel  : EN<->RO harmful matched <- RoSafetyBench crosslingual pairs (patching-only)
+
+Design note (benign semantics). The detection probe must learn *harmfulness*,
+not surface topic. So both benign cells are "looks risky, is benign":
+RoSafetyBench overrefusal on the RO side, XSTest-safe on the EN side. This keeps
+the EN->RO transfer measurement (H1a) from being confounded by a benign-class
+distribution shift.
+
+Determinism. RO cells + parallel + the harm_en local core derive only from
+committed Paper 2 files, so their bytes (and SHA-256) are stable across machines
+and pre-registrable now. The EN cells that need HF datasets (HarmBench, XSTest)
+are built on Colab; their SHA-256 freezes at that point. The MANIFEST records
+per-cell status (`final` vs `pending`).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import random
+from pathlib import Path
+
+# Unified output row schema (superset of Paper 2's row).
+#   id, cell, lang, label, text            (single-language cells)
+#   id, cell, label, text_en, text_ro      (parallel cell)
+# plus provenance: source_dim, category, expected_behavior, source.
+
+SEED = 17
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def _write_jsonl(rows: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _stable_sample(rows: list[dict], n: int, seed: int = SEED) -> list[dict]:
+    """Deterministic sample: sort by id, sample with a fixed RNG, re-sort by id
+    so the written bytes are identical on every machine."""
+    rows_sorted = sorted(rows, key=lambda r: r["id"])
+    if n >= len(rows_sorted):
+        chosen = rows_sorted
+    else:
+        rng = random.Random(seed)
+        chosen = rng.sample(rows_sorted, n)
+    return sorted(chosen, key=lambda r: r["id"])
+
+
+# --- RO cells + parallel (fully local, deterministic) ----------------------
+
+def build_harm_ro(expanded: Path, n: int = 100, seed: int = SEED) -> list[dict]:
+    pool = _read_jsonl(expanded / "toxicity.jsonl") + _read_jsonl(expanded / "jailbreak.jsonl")
+    pool = [r for r in pool if r.get("expected_behavior") == "refuse"]   # defensive
+    rows = _stable_sample(pool, n, seed)
+    return [{
+        "id": r["id"], "cell": "harm_ro", "lang": "ro", "label": "harmful",
+        "text": r["text_ro"], "source_dim": r["dimension"], "category": r.get("category"),
+        "expected_behavior": r.get("expected_behavior"), "source": r.get("source"),
+    } for r in rows]
+
+
+def build_benign_ro(expanded: Path, n: int = 100, seed: int = SEED) -> list[dict]:
+    pool = _read_jsonl(expanded / "overrefusal.jsonl")
+    pool = [r for r in pool if r.get("expected_behavior") == "answer"]   # defensive
+    rows = _stable_sample(pool, n, seed)
+    return [{
+        "id": r["id"], "cell": "benign_ro", "lang": "ro", "label": "benign",
+        "text": r["text_ro"], "source_dim": r["dimension"], "category": r.get("category"),
+        "expected_behavior": r.get("expected_behavior"), "source": r.get("source"),
+    } for r in rows]
+
+
+def build_parallel(expanded: Path) -> list[dict]:
+    """Matched EN<->RO *harmful* pairs (patching workhorse). The crosslingual set
+    mixes harmful / bias / benign. We discriminate on the ``category`` field
+    (== the id prefix), NOT ``expected_behavior``: in Paper 2's crosslingual
+    file the latter is corrupted for benign rows (22/25 benign prompts such as
+    "What is the capital of Romania?" are mislabeled 'refuse'). Keep only
+    category == 'harmful' so the patch set is unambiguous (EN should refuse)."""
+    rows = [r for r in _read_jsonl(expanded / "crosslingual.jsonl")
+            if r.get("category") == "harmful"]
+    rows = sorted(rows, key=lambda r: r["id"])
+    return [{
+        "id": r["id"], "cell": "parallel", "label": "harmful",
+        "text_en": r["text_en"], "text_ro": r["text_ro"],
+        "source_dim": r["dimension"], "category": r.get("category"),
+        "expected_behavior": "refuse", "source": r.get("source"),
+    } for r in rows]
+
+
+def build_harm_en_core(expanded: Path) -> list[dict]:
+    """Local EN-harmful core = matched text_en from the *harmful* crosslingual
+    pairs (category == 'harmful'; see build_parallel for why not
+    expected_behavior). Topped up to target with HarmBench on Colab."""
+    rows = [r for r in _read_jsonl(expanded / "crosslingual.jsonl")
+            if r.get("category") == "harmful"]
+    rows = sorted(rows, key=lambda r: r["id"])
+    return [{
+        "id": r["id"].replace("cro_", "harmen_"), "cell": "harm_en", "lang": "en",
+        "label": "harmful", "text": r["text_en"], "source_dim": "crosslingual_en",
+        "category": r.get("category"), "expected_behavior": "refuse", "source": "rosafetybench_parallel_en",
+    } for r in rows]
+
+
+# --- EN cells that need HF datasets (built on Colab) ------------------------
+
+def build_harm_en_topup(target_n: int = 250, seed: int = SEED) -> list[dict]:
+    """HarmBench standard behaviors (EN harmful). Requires `datasets`."""
+    from datasets import load_dataset  # lazy: only on Colab / with network
+    ds = load_dataset("walledai/HarmBench", "standard", split="train")
+    rows = [{"id": f"hb_{i}", "cell": "harm_en", "lang": "en", "label": "harmful",
+             "text": ex["prompt"], "source_dim": "harmbench_standard",
+             "category": ex.get("category"), "expected_behavior": "refuse",
+             "source": "harmbench"} for i, ex in enumerate(ds)]
+    return _stable_sample(rows, target_n, seed)
+
+
+def build_benign_en(target_n: int = 250, seed: int = SEED) -> list[dict]:
+    """XSTest *safe* prompts (EN benign-but-risky-looking). Requires `datasets`."""
+    from datasets import load_dataset  # lazy
+    ds = load_dataset("natolambert/xstest-v2-copy", split="prompts")
+    rows = [{"id": f"xst_{ex['id_v2']}", "cell": "benign_en", "lang": "en",
+             "label": "benign", "text": ex["prompt"], "source_dim": "xstest_safe",
+             "category": ex.get("type"), "expected_behavior": "answer", "source": "xstest"}
+            for ex in ds if not str(ex.get("type", "")).startswith("contrast")]
+    return _stable_sample(rows, target_n, seed)
+
+
+# --- Orchestration ----------------------------------------------------------
+
+def build_all(expanded: Path, out_dir: Path, *, with_en: bool = False,
+              n_ro: int = 100, n_en: int = 250, seed: int = SEED) -> dict:
+    """Build every cell that is currently buildable, write JSONL + MANIFEST.
+
+    ``with_en=False`` (default, offline): builds RO cells + parallel + harm_en
+    local core; marks benign_en / harm_en-topup as pending.
+    ``with_en=True`` (Colab/network): also pulls HarmBench + XSTest.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict = {"seed": seed, "cells": {}}
+
+    def emit(name: str, rows: list[dict], status: str, source: str):
+        path = out_dir / f"{name}.jsonl"
+        _write_jsonl(rows, path)
+        manifest["cells"][name] = {"n": len(rows), "status": status,
+                                   "source": source, "sha256": sha256_of(path)}
+
+    emit("harm_ro", build_harm_ro(expanded, n_ro, seed), "final", "rosafetybench_tox_jb")
+    emit("benign_ro", build_benign_ro(expanded, n_ro, seed), "final", "rosafetybench_overrefusal")
+    emit("parallel", build_parallel(expanded), "final", "rosafetybench_crosslingual")
+
+    harm_en_core = build_harm_en_core(expanded)
+    if with_en:
+        harm_en = harm_en_core + build_harm_en_topup(n_en - len(harm_en_core), seed)
+        emit("harm_en", _stable_sample(harm_en, n_en, seed), "final", "crosslingual_en+harmbench")
+        emit("benign_en", build_benign_en(n_en, seed), "final", "xstest_safe")
+    else:
+        emit("harm_en", harm_en_core, "core_local_topup_pending", "crosslingual_en (HarmBench top-up pending)")
+        manifest["cells"]["benign_en"] = {"n": 0, "status": "pending_colab",
+                                          "source": "xstest_safe (needs datasets+network)", "sha256": None}
+
+    (out_dir / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    _validate(out_dir)
+    return manifest
+
+
+# Known-benign EN strings that must never appear in a harmful cell (regression
+# guard against the crosslingual expected_behavior corruption).
+_BENIGN_CANARIES = ("Sziget Festival", "capital of Romania", "make polenta", "ciorba")
+
+
+def _validate(out_dir: Path) -> None:
+    """Cheap structural checks. Raises AssertionError on contamination so a bad
+    build can never be silently committed / pre-registered."""
+    for cell, label in [("harm_ro", "harmful"), ("harm_en", "harmful"),
+                        ("benign_ro", "benign"), ("parallel", "harmful")]:
+        path = out_dir / f"{cell}.jsonl"
+        if not path.exists():
+            continue
+        rows = _read_jsonl(path)
+        assert all(r["label"] == label for r in rows), f"{cell}: wrong label present"
+        assert len({r["id"] for r in rows}) == len(rows), f"{cell}: duplicate ids"
+        texts = " ".join((r.get("text") or r.get("text_en") or "") for r in rows)
+        if label == "harmful":
+            for canary in _BENIGN_CANARIES:
+                assert canary not in texts, f"{cell}: benign canary leaked: {canary!r}"
