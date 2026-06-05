@@ -75,3 +75,47 @@ def define_bands(acc_en_by_layer: list[float], saturation_fraction: float = 0.95
     start = int(np.argmax(arr >= thresh))
     peak = int(np.argmax(arr))
     return start, peak
+
+
+def fit_all_layers(acts_en, y_en, train_mask, acts_ro, y_ro, *,
+                   family: str = "logreg") -> ProbeSuite:
+    """Fit a per-layer probe over every block.
+
+    acts_en : (n_en, B, d) float array of EN activations.
+    y_en    : (n_en,) integer/string labels.
+    train_mask : (n_en,) bool — EN train rows; the rest are EN held-out.
+    acts_ro : (n_ro, B, d) RO activations (transfer eval).
+    y_ro    : (n_ro,) RO labels.
+    """
+    import numpy as _np
+    train_mask = _np.asarray(train_mask, dtype=bool)
+    held_mask = ~train_mask
+    suite = ProbeSuite(family=family)
+    B = acts_en.shape[1]
+    for layer in range(B):
+        suite.fit_layer(
+            acts_en[train_mask, layer], y_en[train_mask],
+            acts_en[held_mask, layer], y_en[held_mask],
+            acts_ro[:, layer], y_ro, layer=layer,
+        )
+    return suite
+
+
+def compose_bands(det_acc_en: list[float], exe_acc_en: list[float], n_blocks: int,
+                  saturation_fraction: float = 0.95) -> dict:
+    """Compose detection / execution bands from EN in-language curves only
+    (EXPERIMENT_DESIGN sec 4.3). Detection band runs from where the detection
+    probe saturates up to where the execution probe saturates; execution band
+    from there to the end. Overlap/degenerate cases are reported honestly via
+    the raw saturation points so the claim degrades gracefully (PAPER4_PLAN
+    risk register)."""
+    det_start, det_peak = define_bands(det_acc_en, saturation_fraction)
+    exe_start, exe_peak = define_bands(exe_acc_en, saturation_fraction)
+    det_end = max(det_start + 1, min(exe_start, n_blocks))
+    return {
+        "detection": list(range(det_start, det_end)),
+        "execution": list(range(exe_start, n_blocks)),
+        "det_saturation_start": det_start, "det_peak": det_peak,
+        "exe_saturation_start": exe_start, "exe_peak": exe_peak,
+        "overlap_warning": exe_start <= det_start,
+    }

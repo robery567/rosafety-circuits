@@ -220,27 +220,71 @@ NOTEBOOKS = [
          "**Output:** `data/probes/<short>/`, `results/<short>/linear_probes.json`, "
          "`results/<short>/bands.json`."),
         [
-            ("md", "## Capture activations for all cells"),
-            ("code", "from capture import capture_assistant_prefix\n"
-                     "# For each cell, load prompts -> capture (n, n_blocks, d_model) -> cache to ACT_DIR/<short>/<cell>.pt\n"),
-            ("md", "## Fit per-layer probes (EN train -> EN held / RO transfer)"),
-            ("code", "from probes import ProbeSuite, define_bands\n"
-                     "det = ProbeSuite(family=cfg['probes']['family'])\n"
-                     "exe = ProbeSuite(family=cfg['probes']['family'])\n"
-                     "# for layer in range(n_blocks):\n"
-                     "#   det.fit_layer(...harm/benign...)   # H1a\n"
-                     "#   exe.fit_layer(...refuse/comply...) # H1b\n"),
-            ("md", "## Define bands off EN curves (DO NOT pass RO accuracies here)"),
-            ("code", "det_start, det_peak = define_bands([r.acc_en_held for r in det.per_layer])\n"
-                     "exe_start, exe_peak = define_bands([r.acc_en_held for r in exe.per_layer])\n"
-                     "bands = {'detection': list(range(det_start, exe_start)),\n"
-                     "         'execution': list(range(exe_start, n_blocks))}\n"
-                     "(RESULTS_DIR_SHORT := RESULTS_DIR / short).mkdir(exist_ok=True)\n"
-                     "(RESULTS_DIR_SHORT / 'bands.json').write_text(json.dumps(bands, indent=2))\n"
-                     "print('bands:', bands)"),
-            ("md", "## Plot transfer-drop curves + save results"),
-            ("code", "# Two-line plot: det_drop and exe_drop per layer, with band shading.\n"
-                     "# H1a: det_drop large in detection band. H1b: exe_drop small in execution band.\n"),
+            ("md", "## 1. Load contrastive cells + behavioral labels + probe split (from nb01)"),
+            ("code", "out = CONTRAST_DIR / short\n"
+                     "def _read(name):\n"
+                     "    p = out / f'{name}.jsonl'\n"
+                     "    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]\n"
+                     "cells = {n: _read(n) for n in ['harm_en','benign_en','harm_ro','benign_ro']}\n"
+                     "beh = {json.loads(l)['id']: json.loads(l)['label']\n"
+                     "       for l in (out / 'behavioral_labels.jsonl').read_text().splitlines() if l.strip()}\n"
+                     "split = json.loads((SPLITS_DIR / f'probe_split_{short}.json').read_text())\n"
+                     "train_ids = set(split['train_en'])\n"
+                     "print({n: len(v) for n, v in cells.items()}, 'beh labels:', len(beh))"),
+            ("md", "## 2. Load anchor + capture residuals (cached to Drive)"),
+            ("code", "from transformers import AutoModelForCausalLM, AutoTokenizer\n"
+                     "from capture import capture_assistant_prefix\n"
+                     "tok = AutoTokenizer.from_pretrained(ANCHOR); tok.padding_side='left'\n"
+                     "if tok.pad_token is None: tok.pad_token = tok.eos_token\n"
+                     "model = AutoModelForCausalLM.from_pretrained(ANCHOR, torch_dtype=torch.bfloat16, device_map='cuda').eval()\n"
+                     "n_blocks = model.config.num_hidden_layers\n"
+                     "def capture_cell(name):\n"
+                     "    cache = ACT_DIR / short / f'{name}.pt'; cache.parent.mkdir(parents=True, exist_ok=True)\n"
+                     "    if cache.exists(): return torch.load(cache)\n"
+                     "    acts = capture_assistant_prefix(model, tok, [r['text'] for r in cells[name]])\n"
+                     "    torch.save(acts, cache); return acts\n"
+                     "acts = {n: capture_cell(n) for n in cells}\n"
+                     "print('captured', {n: tuple(a.shape) for n, a in acts.items()})"),
+            ("md", "## 3. Assemble EN/RO matrices (detection = intent; execution = behavior)"),
+            ("code", "import numpy as np\n"
+                     "def stack(names):\n"
+                     "    A = np.concatenate([acts[n].float().numpy() for n in names], 0)\n"
+                     "    rows = [r for n in names for r in cells[n]]\n"
+                     "    ids = [r['id'] for r in rows]\n"
+                     "    y_int = np.array([1 if r['label']=='harmful' else 0 for r in rows])\n"
+                     "    y_beh = np.array([1 if beh.get(i)=='refuse' else 0 for i in ids])\n"
+                     "    return A, ids, y_int, y_beh\n"
+                     "A_en, ids_en, yint_en, ybeh_en = stack(['harm_en','benign_en'])\n"
+                     "A_ro, ids_ro, yint_ro, ybeh_ro = stack(['harm_ro','benign_ro'])\n"
+                     "train_mask = np.array([i in train_ids for i in ids_en])\n"
+                     "print('EN', A_en.shape, 'train', int(train_mask.sum()), '| RO', A_ro.shape)"),
+            ("md", "## 4. Fit per-layer detection (H1a) + execution (H1b) probes"),
+            ("code", "from probes import fit_all_layers, compose_bands\n"
+                     "det = fit_all_layers(A_en, yint_en, train_mask, A_ro, yint_ro)   # harm vs benign\n"
+                     "exe = fit_all_layers(A_en, ybeh_en, train_mask, A_ro, ybeh_ro)   # refuse vs comply\n"
+                     "bands = compose_bands([r.acc_en_held for r in det.per_layer],\n"
+                     "                      [r.acc_en_held for r in exe.per_layer], n_blocks)\n"
+                     "print('bands:', {k: bands[k] for k in ['detection','execution','overlap_warning']})"),
+            ("md", "## 5. Save results + bands (pre-registered: bands read off EN curves only)"),
+            ("code", "rs = RESULTS_DIR / short; rs.mkdir(parents=True, exist_ok=True)\n"
+                     "(rs / 'bands.json').write_text(json.dumps(bands, indent=2))\n"
+                     "per_layer = [{'layer': l,\n"
+                     "  'det_acc_en': det.per_layer[l].acc_en_held, 'det_acc_ro': det.per_layer[l].acc_ro, 'det_drop': det.per_layer[l].drop,\n"
+                     "  'exe_acc_en': exe.per_layer[l].acc_en_held, 'exe_acc_ro': exe.per_layer[l].acc_ro, 'exe_drop': exe.per_layer[l].drop}\n"
+                     "  for l in range(n_blocks)]\n"
+                     "(rs / 'linear_probes.json').write_text(json.dumps({'anchor_model': ANCHOR, 'short': short,\n"
+                     "  'n_blocks': n_blocks, 'bands': bands, 'per_layer': per_layer}, indent=2))\n"
+                     "print('wrote', rs / 'linear_probes.json')"),
+            ("md", "## 6. Plot transfer-drop curves (H1a large in detection band; H1b small in execution band)"),
+            ("code", "import matplotlib.pyplot as plt\n"
+                     "L = range(n_blocks)\n"
+                     "fig, ax = plt.subplots(figsize=(8,4))\n"
+                     "ax.plot(L, [p['det_drop'] for p in per_layer], label='detection EN->RO drop', marker='o', ms=3)\n"
+                     "ax.plot(L, [p['exe_drop'] for p in per_layer], label='execution EN->RO drop', marker='s', ms=3)\n"
+                     "for b in bands['detection']: ax.axvspan(b-0.5, b+0.5, color='C0', alpha=0.06)\n"
+                     "for b in bands['execution']: ax.axvspan(b-0.5, b+0.5, color='C1', alpha=0.06)\n"
+                     "ax.set_xlabel('layer'); ax.set_ylabel('EN->RO accuracy drop'); ax.legend(); ax.set_title(f'{short}: transfer drop')\n"
+                     "fig.tight_layout(); fig.savefig(FIG_DIR / f'transfer_drop_{short}.pdf'); plt.show()"),
         ],
     ),
     (
