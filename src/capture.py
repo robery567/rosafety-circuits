@@ -57,10 +57,16 @@ def capture_block_outputs(model, store: dict):
 
 def last_prefix_index(attention_mask: torch.Tensor) -> torch.Tensor:
     """Index of the last non-pad token per row (the assistant-prefix position
-    when the chat template ends at the generation prompt)."""
-    # attention_mask: (batch, seq). Last 1 per row.
-    lengths = attention_mask.sum(dim=1)  # (batch,)
-    return (lengths - 1).clamp(min=0)
+    when the chat template ends at the generation prompt).
+
+    Robust to padding side: finds the *last* position where mask == 1. Under
+    left-padding (which we use for generation) the real tokens are right-
+    aligned, so this is seq_len-1; under right-padding it is length-1.
+    """
+    seq_len = attention_mask.shape[1]
+    # position of the last 1 in each row = (seq_len-1) - argmax of the reversed mask
+    last_from_end = attention_mask.flip(1).float().argmax(dim=1)
+    return (seq_len - 1 - last_from_end).long()
 
 
 @torch.no_grad()
