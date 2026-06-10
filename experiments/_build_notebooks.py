@@ -463,6 +463,19 @@ NOTEBOOKS = [
 
 
 def build():
+    # Runtime metadata matched to Paper 2/3 convention:
+    #   GPU notebooks  -> accelerator=GPU, colab.gpuType=A100, machine_shape=hm
+    #   CPU notebooks  -> no accelerator/gpuType, machine_shape=hm (aggregate only)
+    gpu_meta = {
+        "kernelspec": {"name": "python3", "display_name": "Python 3"},
+        "accelerator": "GPU",
+        "colab": {"provenance": [], "gpuType": "A100", "machine_shape": "hm"},
+    }
+    cpu_meta = {
+        "kernelspec": {"name": "python3", "display_name": "Python 3"},
+        "colab": {"provenance": [], "machine_shape": "hm"},
+    }
+    import copy
     for fname, title, intro, extra in NOTEBOOKS:
         nb = new_notebook()
         cells = [header(title, intro), new_code_cell(PIP), new_code_cell(BOOTSTRAP)]
@@ -473,14 +486,12 @@ def build():
         for kind, text in extra:
             cells.append(new_markdown_cell(text) if kind == "md" else new_code_cell(text))
         nb["cells"] = cells
-        nb["metadata"] = {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "accelerator": "GPU",
-            "colab": {"provenance": [], "machine_shape": "hm"},
-        }
+        # nb06 (aggregate + figures) is CPU-only; everything else needs an A100.
+        nb["metadata"] = copy.deepcopy(cpu_meta if fname.startswith("06") else gpu_meta)
         out = HERE / fname
         nbf.write(nb, out)
-        print("wrote", out.name, f"({len(cells)} cells)")
+        gpu = "CPU" if fname.startswith("06") else "A100"
+        print("wrote", out.name, f"({len(cells)} cells, {gpu})")
 
 
 if __name__ == "__main__":
