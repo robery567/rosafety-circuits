@@ -33,7 +33,7 @@ PIP = r"""%%capture
     python-dotenv requests huggingface_hub ipywidgets pyyaml matplotlib seaborn -q
 """
 
-BOOTSTRAP = r"""import os, json, gc, sys, hashlib
+BOOTSTRAP = r"""import os, json, gc, sys, hashlib, subprocess
 from pathlib import Path
 from datetime import datetime
 import torch
@@ -59,11 +59,26 @@ if os.environ.get("HF_TOKEN"):
     from huggingface_hub import login
     login(os.environ["HF_TOKEN"], add_to_git_credential=False)
 
-# --- Paths ---
+# --- Artifact root (persistent, on Drive) ---
 DRIVE_ROOT  = Path("/content/drive/MyDrive/PhD/paper4-interpretability")
 PAPER2_ROOT = Path("/content/drive/MyDrive/PhD/paper2-benchmark")
 PAPER3_ROOT = Path("/content/drive/MyDrive/PhD/paper3-alignment")
 
+# --- Code root: use the repo synced on Drive if present, else clone the public
+#     repo to /content. This makes the notebook self-provisioning — you do NOT
+#     have to sync src/ + configs/ to Drive by hand. ---
+REPO_URL = "https://github.com/robery567/rosafety-circuits.git"
+if (DRIVE_ROOT / "src" / "paths.py").exists():
+    CODE_ROOT = DRIVE_ROOT
+else:
+    CODE_ROOT = Path("/content/rosafety-circuits")
+    if not (CODE_ROOT / "src" / "paths.py").exists():
+        print("Paper 4 code not on Drive; cloning", REPO_URL)
+        subprocess.run(["git", "clone", "-q", REPO_URL, str(CODE_ROOT)], check=True)
+print("CODE_ROOT :", CODE_ROOT)
+print("DRIVE_ROOT:", DRIVE_ROOT)
+
+# --- data dirs (Drive, persistent across sessions) ---
 DATA_DIR     = DRIVE_ROOT / "data"
 CONTRAST_DIR = DATA_DIR / "contrastive"
 ACT_DIR      = DATA_DIR / "activations"
@@ -74,10 +89,11 @@ FIG_DIR      = DRIVE_ROOT / "figures"
 LOGS_DIR     = DRIVE_ROOT / "logs"
 for d in [CONTRAST_DIR, ACT_DIR, PROBE_DIR, SPLITS_DIR, RESULTS_DIR, FIG_DIR, LOGS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR = CODE_ROOT / "configs"   # configs live in the repo, not in data/
 
-# --- Reuse Paper 2 judge harness + Paper 3 helpers; Paper 4 src/ ---
+# --- Reuse Paper 2 judge harness; Paper 4 src/ from CODE_ROOT ---
 sys.path.insert(0, str(PAPER2_ROOT / "src"))      # judges.py, llm_judge.py
-sys.path.insert(0, str(DRIVE_ROOT / "src"))        # paths, capture, probes, patching, sae_utils, contrastive, behavioral
+sys.path.insert(0, str(CODE_ROOT / "src"))         # paths, capture, probes, patching, sae_utils, contrastive, behavioral
 
 # --- A100 sanity ---
 assert torch.cuda.is_available(), "Need a GPU runtime (A100 high-RAM)."
@@ -166,7 +182,7 @@ NOTEBOOKS = [
                    "- `harm_ro` / `benign_ro`: RoSafetyBench (`paper2-benchmark/benchmark/expanded/`).\n"
                    "- `parallel`: RoSafetyBench crosslingual harmful pairs (`category=='harmful'`, patching-only)."),
             ("code", "import yaml\n"
-                     "cfg = yaml.safe_load((DRIVE_ROOT / 'configs' / 'experiments.yaml').read_text())\n"
+                     "cfg = yaml.safe_load((CONFIG_DIR / 'experiments.yaml').read_text())\n"
                      "cells_cfg = cfg['contrastive_sets']['cells']\n"
                      "cells_cfg"),
             ("md", "## 1. Build all cells (EN cells pull HarmBench + XSTest from HF)\n\n"
@@ -559,7 +575,7 @@ NOTEBOOKS = [
             ("code", "from scipy.stats import spearmanr\n"
                      "# detection-band drop vs the Paper 2 behavioral RO gap per anchor (read from models.yaml baselines).\n"
                      "import yaml\n"
-                     "mdl = yaml.safe_load((DRIVE_ROOT / 'configs' / 'models.yaml').read_text())\n"
+                     "mdl = yaml.safe_load((CONFIG_DIR / 'models.yaml').read_text())\n"
                      "base = {m['short']: m.get('paper2_baseline', {}) for m in mdl.get('anchors', [])}\n"
                      "xs, ys, labs = [], [], []\n"
                      "for s in shorts:\n"
