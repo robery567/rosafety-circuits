@@ -389,18 +389,65 @@ NOTEBOOKS = [
          "`results/gemma-2-2b/sae_features.json`."),
         [
             ("code", "assert short == 'gemma-2-2b', 'H1e is Gemma-only (Gemma Scope SAEs).'"),
-            ("md", "## Load Gemma Scope SAEs (per layer)"),
-            ("code", "from sae_lens import SAE\n"
-                     "# repo = google/gemma-scope-2b-pt-res (or -it-res if coverage ok; see plan §13.1)\n"
-                     "# load one SAE per band layer; hook = resid_post.\n"),
-            ("md", "## Encode cell activations -> SAE latents"),
-            ("code", "from sae_utils import difference_in_means_features, en_ro_firing_gap\n"
-                     "# det_feats = difference_in_means_features(harm_en_lat, benign_en_lat)\n"
-                     "# ref_feats = difference_in_means_features(refusal_lat, comply_lat)\n"),
-            ("md", "## EN vs RO firing comparison + width ablation"),
-            ("code", "# gap_det = en_ro_firing_gap(harm_en_lat, harm_ro_lat, det_feats)\n"
-                     "# gap_ref = en_ro_firing_gap(harm_en_lat, harm_ro_lat, ref_feats)\n"
-                     "# Repeat at a second SAE width; conclusion must survive (plan §8).\n"),
+            ("md", "## 1. Load cells + behavioral labels + bands; load anchor"),
+            ("code", "out = CONTRAST_DIR / short\n"
+                     "def _read(n): return [json.loads(l) for l in (out/f'{n}.jsonl').read_text().splitlines() if l.strip()]\n"
+                     "cells = {n: _read(n) for n in ['harm_en','benign_en','harm_ro','benign_ro']}\n"
+                     "beh = {json.loads(l)['id']: json.loads(l)['label'] for l in (out/'behavioral_labels.jsonl').read_text().splitlines() if l.strip()}\n"
+                     "bands = json.loads((RESULTS_DIR / short / 'bands.json').read_text())\n"
+                     "band_layers = sorted(set(bands['detection'] + bands['execution']))\n"
+                     "from transformers import AutoModelForCausalLM, AutoTokenizer\n"
+                     "from capture import capture_assistant_prefix\n"
+                     "tok = AutoTokenizer.from_pretrained(ANCHOR); tok.padding_side='left'\n"
+                     "if tok.pad_token is None: tok.pad_token = tok.eos_token\n"
+                     "model = AutoModelForCausalLM.from_pretrained(ANCHOR, torch_dtype=torch.bfloat16, device_map='cuda').eval()"),
+            ("md", "## 2. Capture residuals per cell (reuse nb02 cache if present)"),
+            ("code", "def cap(name):\n"
+                     "    c = ACT_DIR / short / f'{name}.pt'\n"
+                     "    if c.exists(): return torch.load(c)\n"
+                     "    c.parent.mkdir(parents=True, exist_ok=True)\n"
+                     "    a = capture_assistant_prefix(model, tok, [r['text'] for r in cells[name]]); torch.save(a, c); return a\n"
+                     "acts = {n: cap(n) for n in cells}\n"
+                     "print({n: tuple(a.shape) for n, a in acts.items()})"),
+            ("md", "## 3. Per-band-layer: load SAE, find detection + refusal features, compare EN vs RO firing\n\n"
+                   "Detection features separate harm_en vs benign_en; refusal features separate\n"
+                   "behaviorally-refused vs complied prompts. H1e: detection features under-fire\n"
+                   "on RO in the detection band; refusal features fire comparably."),
+            ("code", "from sae_utils import load_gemma_scope_sae, encode_acts, difference_in_means_features, en_ro_firing_gap\n"
+                     "WIDTH = '16k'   # ablate '65k' in a second pass (plan §8)\n"
+                     "def beh_mask(names, label):\n"
+                     "    rows = [r for n in names for r in cells[n]]\n"
+                     "    return np.array([beh.get(r['id'])==label for r in rows])\n"
+                     "rows_en = cells['harm_en'] + cells['benign_en']\n"
+                     "ref_mask = np.array([beh.get(r['id'])=='refuse' for r in rows_en])\n"
+                     "per_layer = []\n"
+                     "for L in band_layers:\n"
+                     "    sae = load_gemma_scope_sae(L, width=WIDTH)\n"
+                     "    z = {n: encode_acts(sae, acts[n][:, L]) for n in cells}\n"
+                     "    z_en = np.concatenate([z['harm_en'], z['benign_en']], 0)\n"
+                     "    det_feats = difference_in_means_features(z['harm_en'], z['benign_en'])\n"
+                     "    ref_feats = difference_in_means_features(z_en[ref_mask], z_en[~ref_mask])\n"
+                     "    gap_det = en_ro_firing_gap(z['harm_en'], z['harm_ro'], det_feats)\n"
+                     "    gap_ref = en_ro_firing_gap(z['harm_en'], z['harm_ro'], ref_feats)\n"
+                     "    band = 'detection' if L in bands['detection'] else 'execution'\n"
+                     "    per_layer.append({'layer': L, 'band': band,\n"
+                     "        'det_en_minus_ro': gap_det['en_minus_ro'], 'ref_en_minus_ro': gap_ref['en_minus_ro']})\n"
+                     "    del sae; gc.collect(); torch.cuda.empty_cache()\n"
+                     "    print(f\"L{L} ({band}): det EN-RO firing {gap_det['en_minus_ro']:+.3f} | ref {gap_ref['en_minus_ro']:+.3f}\")"),
+            ("md", "## 4. Save + plot"),
+            ("code", "rs = RESULTS_DIR / short; rs.mkdir(parents=True, exist_ok=True)\n"
+                     "(rs / 'sae_features.json').write_text(json.dumps({'anchor_model': ANCHOR, 'short': short,\n"
+                     "    'analysis': 'sae_features', 'width': WIDTH, 'bands': bands, 'per_layer': per_layer}, indent=2))\n"
+                     "import matplotlib.pyplot as plt\n"
+                     "L = [p['layer'] for p in per_layer]\n"
+                     "fig, ax = plt.subplots(figsize=(8,4))\n"
+                     "ax.plot(L, [p['det_en_minus_ro'] for p in per_layer], 'o-', label='detection features (EN-RO firing)')\n"
+                     "ax.plot(L, [p['ref_en_minus_ro'] for p in per_layer], 's-', label='refusal features (EN-RO firing)')\n"
+                     "ax.axhline(0, color='k', lw=0.5)\n"
+                     "for b in bands['detection']: ax.axvspan(b-0.5, b+0.5, color='C0', alpha=0.06)\n"
+                     "ax.set_xlabel('layer'); ax.set_ylabel('EN minus RO firing rate'); ax.legend(fontsize=8)\n"
+                     "ax.set_title(f'{short}: SAE feature firing (H1e)')\n"
+                     "fig.tight_layout(); fig.savefig(FIG_DIR / f'sae_firing_{short}.pdf'); plt.show()"),
         ],
     ),
     (
@@ -415,21 +462,53 @@ NOTEBOOKS = [
          "`results/<short>/paper3_crossref.json`."),
         [
             ("code", "assert short in ('qwen2.5-3b', 'llama-3.2-3b'), 'H1d uses the two shared Paper-3 anchors.'"),
-            ("md", "## Band membership of Paper 3's selected blocks"),
-            ("code", "p3_blocks = json.loads((PAPER3_ROOT / 'data' / 'probes' / short / 'selected_blocks.json').read_text())\n"
+            ("md", "## 1. Band membership of Paper 3's refusal-direction blocks\n\n"
+                   "H1d predicts Paper 3's `selected_blocks` (the refusal-direction top-k it trained\n"
+                   "on) fall in the **execution** band, explaining why RD-DPO couldn't repair an\n"
+                   "upstream detection deficit."),
+            ("code", "p3 = json.loads((PAPER3_ROOT / 'data' / 'probes' / short / 'selected_blocks.json').read_text())\n"
                      "bands = json.loads((RESULTS_DIR / short / 'bands.json').read_text())\n"
-                     "sel = p3_blocks.get('4') or p3_blocks.get(4)  # k=4\n"
+                     "sel = p3.get('4') or p3.get(4)   # k=4, matched to Paper 3\n"
                      "in_exec = [b for b in sel if b in bands['execution']]\n"
-                     "print('Paper 3 k=4 blocks:', sel)\n"
-                     "print('of which in execution band:', in_exec)"),
-            ("md", "## Confirmatory: detection-band-targeted DPO (reuse Paper 3)"),
-            ("code", "# Override Paper 3 target_blocks = detection band (top-k by detection-probe acc),\n"
-                     "# run PAPER3_ROOT/experiments/03_train_rd_dpo.ipynb (seed 17 pilot),\n"
-                     "# eval with 04_eval_safety.ipynb on the RoSafetyBench holdout,\n"
-                     "# compare gap closure vs Paper 3's execution-band selection.\n"),
-            ("md", "## Record outcome"),
-            ("code", "# Both outcomes publishable: detection>execution confirms H1d;\n"
-                     "# both-fail => deficit not LoRA-repairable at this budget (localization still stands).\n"),
+                     "in_det  = [b for b in sel if b in bands['detection']]\n"
+                     "print(f'Paper 3 k=4 blocks: {sel}')\n"
+                     "print(f'  in execution band {bands[\"execution\"]}: {in_exec}')\n"
+                     "print(f'  in detection band {bands[\"detection\"]}: {in_det}')\n"
+                     "h1d_supported = len(in_exec) > len(in_det)\n"
+                     "print('H1d (blocks are execution-band):', h1d_supported)"),
+            ("md", "## 2. Emit detection-band target blocks for the confirmatory DPO run\n\n"
+                   "Top-k by **detection**-probe accuracy within the detection band (k matched to\n"
+                   "Paper 3). Feed these to Paper 3's `03_train_rd_dpo` as a `target_blocks` override."),
+            ("code", "lp = json.loads((RESULTS_DIR / short / 'linear_probes.json').read_text())\n"
+                     "det_layers = sorted(bands['detection'],\n"
+                     "                    key=lambda L: lp['per_layer'][L]['det_acc_en'], reverse=True)[:4]\n"
+                     "det_layers = sorted(det_layers)\n"
+                     "target = {'4': det_layers}\n"
+                     "p3_override = PAPER3_ROOT / 'data' / 'probes' / short / 'selected_blocks_detection.json'\n"
+                     "p3_override.write_text(json.dumps(target, indent=2))\n"
+                     "print('detection-band target blocks (k=4):', det_layers)\n"
+                     "print('wrote override for Paper 3 ->', p3_override)"),
+            ("md", "## 3. Confirmatory run (manual, reuses Paper 3 wholesale)\n\n"
+                   "In the Paper 3 repo, run `experiments/03_train_rd_dpo.ipynb` with\n"
+                   "`target_blocks = selected_blocks_detection.json` (one seed pilot, then 3 seeds\n"
+                   "if promising), then `04_eval_safety.ipynb` on the RoSafetyBench holdout. Both\n"
+                   "outcomes are publishable: detection-band > execution-band confirms H1d; both\n"
+                   "failing shows the deficit isn't LoRA-repairable at this budget (localization\n"
+                   "stands independently)."),
+            ("md", "## 4. Compare gap closure (auto-loads Paper 3 eval results if present)"),
+            ("code", "def _load_safety(cond):\n"
+                     "    f = PAPER3_ROOT / 'results' / f'{short}__{cond}__seed17__safety.json'\n"
+                     "    return json.loads(f.read_text()) if f.exists() else None\n"
+                     "exec_dpo = _load_safety('rd-dpo-k4-bal-e6-x4')      # Paper 3's execution-band selection\n"
+                     "det_dpo  = _load_safety('rd-dpo-k4-detection')       # the confirmatory detection-band run\n"
+                     "result = {'anchor_model': ANCHOR, 'short': short, 'analysis': 'paper3_crossref',\n"
+                     "          'paper3_selected_k4': sel, 'bands': bands,\n"
+                     "          'selected_in_execution': in_exec, 'selected_in_detection': in_det,\n"
+                     "          'h1d_blocks_are_execution': h1d_supported,\n"
+                     "          'detection_band_target': det_layers,\n"
+                     "          'exec_dpo_present': exec_dpo is not None, 'det_dpo_present': det_dpo is not None}\n"
+                     "(RESULTS_DIR / short / 'paper3_crossref.json').write_text(json.dumps(result, indent=2))\n"
+                     "print(json.dumps({k: result[k] for k in ['h1d_blocks_are_execution','detection_band_target','det_dpo_present']}, indent=2))"),
         ],
     ),
     (
@@ -442,21 +521,59 @@ NOTEBOOKS = [
          "for the manuscript. No GPU.\n\n**Output:** `figures/*.pdf`, "
          "`manuscript/tables/*.tex`."),
         [
-            ("md", "## Load all results"),
-            ("code", "import pandas as pd, glob\n"
-                     "rows = [json.loads(Path(p).read_text()) for p in glob.glob(str(RESULTS_DIR / '*' / '*.json'))]\n"
-                     "print('result files:', len(rows))"),
-            ("md", "## Headline figures"),
-            ("code", "# fig1: per-layer det/exe transfer drop (3 anchors, band-shaded).\n"
-                     "# fig2: patching restoration curve + controls.\n"
-                     "# fig3: SAE detection vs refusal feature firing EN vs RO (Gemma).\n"
-                     "# fig4: Paper 3 selected blocks on the band map.\n"
-                     "# fig5: mechanistic-vs-behavioral Spearman scatter.\n"),
-            ("md", "## Mechanistic-vs-behavioral correlation (Spearman exact-p)"),
+            ("md", "## 1. Load all per-anchor results"),
+            ("code", "import glob\n"
+                     "shorts = sorted({Path(p).parent.name for p in glob.glob(str(RESULTS_DIR / '*' / '*.json'))})\n"
+                     "def load(short, name):\n"
+                     "    f = RESULTS_DIR / short / f'{name}.json'\n"
+                     "    return json.loads(f.read_text()) if f.exists() else None\n"
+                     "R = {s: {n: load(s, n) for n in ['linear_probes','activation_patching','sae_features','paper3_crossref']} for s in shorts}\n"
+                     "print('anchors with results:', shorts)"),
+            ("md", "## 2. Headline table (H1a/H1b/H1c/H1d per anchor)"),
+            ("code", "import numpy as np, pandas as pd\n"
+                     "rows = []\n"
+                     "for s in shorts:\n"
+                     "    lp, ap, x3 = R[s]['linear_probes'], R[s]['activation_patching'], R[s]['paper3_crossref']\n"
+                     "    row = {'anchor': s}\n"
+                     "    if lp:\n"
+                     "        b = lp['bands']; pl = lp['per_layer']\n"
+                     "        row['det_drop@detection'] = np.mean([pl[L]['det_drop'] for L in b['detection']])\n"
+                     "        row['exe_drop@execution'] = np.mean([pl[L]['exe_drop'] for L in b['execution']])\n"
+                     "    if ap:\n"
+                     "        row['patch_peak_band'] = ap['peak_band']; row['patch_peak_restoration'] = ap['per_layer'][ap['peak_layer']]['restoration']\n"
+                     "    if x3:\n"
+                     "        row['H1d_blocks_execution'] = x3['h1d_blocks_are_execution']\n"
+                     "    rows.append(row)\n"
+                     "df = pd.DataFrame(rows).set_index('anchor')\n"
+                     "df"),
+            ("md", "## 3. Cross-anchor figure: detection vs execution transfer drop in-band"),
+            ("code", "import matplotlib.pyplot as plt\n"
+                     "fig, ax = plt.subplots(figsize=(6,4))\n"
+                     "x = np.arange(len(df)); w = 0.38\n"
+                     "ax.bar(x-w/2, df['det_drop@detection'], w, label='detection drop @ detection band')\n"
+                     "ax.bar(x+w/2, df['exe_drop@execution'], w, label='execution drop @ execution band')\n"
+                     "ax.set_xticks(x); ax.set_xticklabels(df.index, rotation=15); ax.set_ylabel('EN->RO accuracy drop')\n"
+                     "ax.legend(fontsize=8); ax.set_title('H1a/H1b: detection drop >> execution drop')\n"
+                     "fig.tight_layout(); fig.savefig(FIG_DIR / 'summary_transfer_drop.pdf'); plt.show()"),
+            ("md", "## 4. Mechanistic-vs-behavioral correlation (cross-anchor; small-n, report ρ)"),
             ("code", "from scipy.stats import spearmanr\n"
-                     "# Correlate per-prompt detection-probe RO confidence vs Paper 2 behavioral refusal.\n"),
-            ("md", "## Emit LaTeX table fragments"),
-            ("code", "# Write manuscript/tables/headline.tex etc. (manuscript/ is gitignored).\n"),
+                     "# detection-band drop vs the Paper 2 behavioral RO gap per anchor (read from models.yaml baselines).\n"
+                     "import yaml\n"
+                     "mdl = yaml.safe_load((DRIVE_ROOT / 'configs' / 'models.yaml').read_text())\n"
+                     "base = {m['short']: m.get('paper2_baseline', {}) for m in mdl.get('anchors', [])}\n"
+                     "xs, ys, labs = [], [], []\n"
+                     "for s in shorts:\n"
+                     "    if s in base and base[s] and not np.isnan(df.loc[s].get('det_drop@detection', np.nan)):\n"
+                     "        xs.append(1 - base[s]['tox']); ys.append(df.loc[s]['det_drop@detection']); labs.append(s)\n"
+                     "if len(xs) >= 3:\n"
+                     "    rho, p = spearmanr(xs, ys); print(f'Spearman rho={rho:.2f} p={p:.3f} (n={len(xs)})')\n"
+                     "else:\n"
+                     "    print(f'n={len(xs)} anchors with both signals — need >=3 for a correlation.')"),
+            ("md", "## 5. Emit LaTeX headline table (manuscript/tables/ — gitignored)"),
+            ("code", "tdir = DRIVE_ROOT / 'manuscript' / 'tables'; tdir.mkdir(parents=True, exist_ok=True)\n"
+                     "(tdir / 'headline.tex').write_text(df.round(3).to_latex())\n"
+                     "print('wrote', tdir / 'headline.tex')\n"
+                     "print(df.round(3).to_string())"),
         ],
     ),
 ]

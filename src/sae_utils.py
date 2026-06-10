@@ -3,12 +3,37 @@
 Gemma-only corroboration. Uses pretrained Gemma Scope JumpReLU residual SAEs
 (Lieberum et al. 2024) via ``sae_lens`` — no SAE training. We identify
 detection features (separate harm_en vs benign_en) and refusal features
-(separate refusal vs compliance generations), then compare their firing on
-EN vs RO harmful prompts across the detection/execution bands.
+(separate refused vs complied prompts), then compare their firing on EN vs RO
+harmful prompts across the detection/execution bands.
 """
 from __future__ import annotations
 
 import numpy as np
+
+
+def load_gemma_scope_sae(layer: int, *, width: str = "16k", device: str = "cuda",
+                         release: str = "gemma-scope-2b-pt-res-canonical"):
+    """Load one Gemma Scope residual SAE (canonical) for a block. Returns the SAE.
+
+    Robust to sae_lens returning either the SAE or a (sae, cfg, sparsity) tuple.
+    Verify -it vs -pt residual coverage in week 1 (PAPER4_PLAN §13.1); the
+    canonical release covers all 26 Gemma-2-2B layers.
+    """
+    from sae_lens import SAE  # lazy: Colab only
+    sae_id = f"layer_{layer}/width_{width}/canonical"
+    r = SAE.from_pretrained(release=release, sae_id=sae_id, device=device)
+    sae = r[0] if isinstance(r, (tuple, list)) else r
+    return sae.eval()
+
+
+def encode_acts(sae, acts) -> np.ndarray:
+    """Encode (n, d_model) residual activations into (n, n_features) SAE latents."""
+    import torch
+    with torch.no_grad():
+        x = acts.to(next(sae.parameters()).dtype).to(next(sae.parameters()).device) \
+            if hasattr(sae, "parameters") else acts
+        z = sae.encode(x)
+    return z.detach().float().cpu().numpy()
 
 
 def difference_in_means_features(acts_pos: np.ndarray, acts_neg: np.ndarray,
