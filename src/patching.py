@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 import torch
 
-from .capture import _decoder_blocks, last_prefix_index
+from capture import _decoder_blocks, last_prefix_index
 
 
 @contextmanager
