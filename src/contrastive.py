@@ -131,13 +131,37 @@ def build_harm_en_topup(target_n: int = 250, seed: int = SEED) -> list[dict]:
 
 
 def build_benign_en(target_n: int = 250, seed: int = SEED) -> list[dict]:
-    """XSTest *safe* prompts (EN benign-but-risky-looking). Requires `datasets`."""
+    """XSTest *safe* prompts (EN benign-but-risky-looking). Requires `datasets`.
+
+    Schema-robust: XSTest copies vary in their id/label columns, so we derive
+    the text from ``prompt`` (fallback ``text``), classify safe-vs-unsafe from a
+    ``label`` column if present else from the ``type`` prefix (XSTest unsafe
+    types are ``contrast_*``), and use the row index for a stable id.
+    """
     from datasets import load_dataset  # lazy
     ds = load_dataset("natolambert/xstest-v2-copy", split="prompts")
-    rows = [{"id": f"xst_{ex['id_v2']}", "cell": "benign_en", "lang": "en",
-             "label": "benign", "text": ex["prompt"], "source_dim": "xstest_safe",
-             "category": ex.get("type"), "expected_behavior": "answer", "source": "xstest"}
-            for ex in ds if not str(ex.get("type", "")).startswith("contrast")]
+    cols = set(ds.column_names)
+    text_col = "prompt" if "prompt" in cols else ("text" if "text" in cols else None)
+    if text_col is None:
+        raise KeyError(f"XSTest: no prompt/text column in {sorted(cols)}")
+
+    def is_safe(ex) -> bool:
+        # XSTest's canonical signal is `type`: unsafe prompts are `contrast_*`,
+        # the 250 safe prompts are not. Fall back to a `label` column only if
+        # `type` is missing in this copy.
+        if "type" in cols and ex.get("type") is not None:
+            return not str(ex["type"]).startswith("contrast")
+        if "label" in cols and ex.get("label") is not None:
+            return str(ex["label"]).lower() == "safe"
+        return True
+
+    rows = []
+    for i, ex in enumerate(ds):
+        if not is_safe(ex):
+            continue
+        rows.append({"id": f"xst_{i}", "cell": "benign_en", "lang": "en",
+                     "label": "benign", "text": ex[text_col], "source_dim": "xstest_safe",
+                     "category": ex.get("type"), "expected_behavior": "answer", "source": "xstest"})
     return _stable_sample(rows, target_n, seed)
 
 
