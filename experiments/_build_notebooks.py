@@ -65,15 +65,18 @@ PAPER2_ROOT = Path("/content/drive/MyDrive/PhD/paper2-benchmark")
 PAPER3_ROOT = Path("/content/drive/MyDrive/PhD/paper3-alignment")
 
 # --- Code root: use the repo synced on Drive if present, else clone the public
-#     repo to /content. This makes the notebook self-provisioning — you do NOT
-#     have to sync src/ + configs/ to Drive by hand. ---
+#     repo to /content. Self-provisioning AND self-updating: if the /content
+#     clone already exists we `git pull` it, so you always get the latest code. ---
 REPO_URL = "https://github.com/robery567/rosafety-circuits.git"
 if (DRIVE_ROOT / "src" / "paths.py").exists():
     CODE_ROOT = DRIVE_ROOT
 else:
     CODE_ROOT = Path("/content/rosafety-circuits")
-    if not (CODE_ROOT / "src" / "paths.py").exists():
-        print("Paper 4 code not on Drive; cloning", REPO_URL)
+    if (CODE_ROOT / ".git").exists():
+        print("Updating Paper 4 code (git pull):", CODE_ROOT)
+        subprocess.run(["git", "-C", str(CODE_ROOT), "pull", "-q", "--ff-only"], check=False)
+    else:
+        print("Cloning Paper 4 code:", REPO_URL)
         subprocess.run(["git", "clone", "-q", REPO_URL, str(CODE_ROOT)], check=True)
 print("CODE_ROOT :", CODE_ROOT)
 print("DRIVE_ROOT:", DRIVE_ROOT)
@@ -94,6 +97,11 @@ CONFIG_DIR = CODE_ROOT / "configs"   # configs live in the repo, not in data/
 # --- Reuse Paper 2 judge harness; Paper 4 src/ from CODE_ROOT ---
 sys.path.insert(0, str(PAPER2_ROOT / "src"))      # judges.py, llm_judge.py
 sys.path.insert(0, str(CODE_ROOT / "src"))         # paths, capture, probes, patching, sae_utils, contrastive, behavioral
+
+# Drop any cached Paper 4 modules so a fresh import picks up a just-pulled
+# version without needing a kernel restart.
+for _m in ("paths", "capture", "probes", "patching", "sae_utils", "contrastive", "behavioral"):
+    sys.modules.pop(_m, None)
 
 # --- A100 sanity ---
 assert torch.cuda.is_available(), "Need a GPU runtime (A100 high-RAM)."
