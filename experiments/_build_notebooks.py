@@ -215,10 +215,11 @@ NOTEBOOKS = [
             ("md", "## 3. Behavioral labels (execution-probe target) — Paper 2 judge\n\n"
                    "Greedy one completion per prompt, judged refuse/comply by `gpt-5-mini`\n"
                    "(same protocol as Paper 2/3). Idempotent via the judge's on-disk cache."),
-            ("code", "from llm_judge import Judge          # Paper 2 src/\n"
+            ("code", "import yaml\n"
+                     "from llm_judge import Judge          # Paper 2 src/\n"
                      "from behavioral import behavioral_labels_for_cells, gap_exhibiting_pairs\n"
-                     "judge = Judge(model=cfg.get('judge', {}).get('primary', 'openai/gpt-5-mini')\n"
-                     "              if isinstance(cfg.get('judge'), dict) else 'openai/gpt-5-mini')\n"
+                     "jcfg = yaml.safe_load((CONFIG_DIR / 'models.yaml').read_text()).get('judge', {})\n"
+                     "judge = Judge(model=jcfg.get('primary', 'openai/gpt-5-mini'))\n"
                      "labels_path = behavioral_labels_for_cells(model, tok, judge, out)\n"
                      "print('wrote', labels_path)\n"
                      "print(f'judge calls={judge.total_calls} cache_hits={judge.total_cache_hits}')"),
@@ -268,7 +269,10 @@ NOTEBOOKS = [
                      "n_blocks = n_layers(model)\n"
                      "def capture_cell(name):\n"
                      "    cache = ACT_DIR / short / f'{name}.pt'; cache.parent.mkdir(parents=True, exist_ok=True)\n"
-                     "    if cache.exists(): return torch.load(cache)\n"
+                     "    if cache.exists():\n"
+                     "        a = torch.load(cache)\n"
+                     "        if a.shape[0] == len(cells[name]): return a\n"
+                     "        print(f'  stale cache for {name} ({a.shape[0]} != {len(cells[name])} rows); recomputing')\n"
                      "    acts = capture_assistant_prefix(model, tok, [r['text'] for r in cells[name]])\n"
                      "    torch.save(acts, cache); return acts\n"
                      "acts = {n: capture_cell(n) for n in cells}\n"
@@ -409,11 +413,11 @@ NOTEBOOKS = [
     ),
     (
         "04_sae_features.ipynb",
-        "04 · Gemma Scope SAE feature analysis (H1e)",
-        ("**Gemma anchor only — corroboration.** Load pretrained Gemma Scope "
-         "JumpReLU residual SAEs (no training), identify detection features "
-         "(separate harm_en vs benign_en) and refusal features (separate "
-         "refusal vs compliance), and compare firing on EN vs RO harmful "
+        "04 · Gemma Scope 2 SAE feature analysis (H1e)",
+        ("**Gemma anchor only — corroboration.** Load pretrained Gemma Scope 2 "
+         "JumpReLU residual SAEs (Gemma 3 family; no training), identify detection "
+         "features (separate harm_en vs benign_en) and refusal features (separate "
+         "refused vs complied prompts), and compare firing on EN vs RO harmful "
          "prompts across the bands. H1e: detection features under-fire on RO "
          "in the detection band.\n\n**Output:** "
          "`results/gemma-3-4b/sae_features.json`."),
@@ -433,9 +437,10 @@ NOTEBOOKS = [
                      "model = AutoModelForCausalLM.from_pretrained(ANCHOR, torch_dtype=torch.bfloat16, device_map='cuda').eval()"),
             ("md", "## 2. Capture residuals per cell (reuse nb02 cache if present)"),
             ("code", "def cap(name):\n"
-                     "    c = ACT_DIR / short / f'{name}.pt'\n"
-                     "    if c.exists(): return torch.load(c)\n"
-                     "    c.parent.mkdir(parents=True, exist_ok=True)\n"
+                     "    c = ACT_DIR / short / f'{name}.pt'; c.parent.mkdir(parents=True, exist_ok=True)\n"
+                     "    if c.exists():\n"
+                     "        a = torch.load(c)\n"
+                     "        if a.shape[0] == len(cells[name]): return a\n"
                      "    a = capture_assistant_prefix(model, tok, [r['text'] for r in cells[name]]); torch.save(a, c); return a\n"
                      "acts = {n: cap(n) for n in cells}\n"
                      "print({n: tuple(a.shape) for n, a in acts.items()})"),
@@ -471,9 +476,7 @@ NOTEBOOKS = [
                    "behaviorally-refused vs complied prompts. H1e: detection features under-fire\n"
                    "on RO in the detection band; refusal features fire comparably."),
             ("code", "from sae_utils import load_gemma_scope_sae, encode_acts, difference_in_means_features, en_ro_firing_gap\n"
-                     "def beh_mask(names, label):\n"
-                     "    rows = [r for n in names for r in cells[n]]\n"
-                     "    return np.array([beh.get(r['id'])==label for r in rows])\n"
+                     "import numpy as np\n"
                      "rows_en = cells['harm_en'] + cells['benign_en']\n"
                      "ref_mask = np.array([beh.get(r['id'])=='refuse' for r in rows_en])\n"
                      "per_layer = []\n"
@@ -536,8 +539,8 @@ NOTEBOOKS = [
                    "Top-k by **detection**-probe accuracy within the detection band (k matched to\n"
                    "Paper 3). Feed these to Paper 3's `03_train_rd_dpo` as a `target_blocks` override."),
             ("code", "lp = json.loads((RESULTS_DIR / short / 'linear_probes.json').read_text())\n"
-                     "det_layers = sorted(bands['detection'],\n"
-                     "                    key=lambda L: lp['per_layer'][L]['det_acc_en'], reverse=True)[:4]\n"
+                     "by_layer = {p['layer']: p for p in lp['per_layer']}\n"
+                     "det_layers = sorted(bands['detection'], key=lambda L: by_layer[L]['det_acc_en'], reverse=True)[:4]\n"
                      "det_layers = sorted(det_layers)\n"
                      "target = {'4': det_layers}\n"
                      "p3_override = PAPER3_ROOT / 'data' / 'probes' / short / 'selected_blocks_detection.json'\n"
@@ -594,11 +597,11 @@ NOTEBOOKS = [
                      "    lp, ap, x3 = R[s]['linear_probes'], R[s]['activation_patching'], R[s]['paper3_crossref']\n"
                      "    row = {'anchor': s}\n"
                      "    if lp:\n"
-                     "        b = lp['bands']; pl = lp['per_layer']\n"
-                     "        row['det_drop@detection'] = np.mean([pl[L]['det_drop'] for L in b['detection']])\n"
-                     "        row['exe_drop@execution'] = np.mean([pl[L]['exe_drop'] for L in b['execution']])\n"
+                     "        b = lp['bands']; pl = {p['layer']: p for p in lp['per_layer']}\n"
+                     "        row['det_drop@detection'] = float(np.mean([pl[L]['det_drop'] for L in b['detection']]))\n"
+                     "        row['exe_drop@execution'] = float(np.mean([pl[L]['exe_drop'] for L in b['execution']]))\n"
                      "    if ap:\n"
-                     "        row['patch_peak_band'] = ap['peak_band']; row['patch_peak_restoration'] = ap['per_layer'][ap['peak_layer']]['restoration']\n"
+                     "        row['patch_peak_band'] = ap['peak_band']; row['patch_peak_restoration'] = {p['layer']: p for p in ap['per_layer']}[ap['peak_layer']]['restoration']\n"
                      "    if x3:\n"
                      "        row['H1d_blocks_execution'] = x3['h1d_blocks_are_execution']\n"
                      "    rows.append(row)\n"
@@ -606,13 +609,16 @@ NOTEBOOKS = [
                      "df"),
             ("md", "## 3. Cross-anchor figure: detection vs execution transfer drop in-band"),
             ("code", "import matplotlib.pyplot as plt\n"
-                     "fig, ax = plt.subplots(figsize=(6,4))\n"
-                     "x = np.arange(len(df)); w = 0.38\n"
-                     "ax.bar(x-w/2, df['det_drop@detection'], w, label='detection drop @ detection band')\n"
-                     "ax.bar(x+w/2, df['exe_drop@execution'], w, label='execution drop @ execution band')\n"
-                     "ax.set_xticks(x); ax.set_xticklabels(df.index, rotation=15); ax.set_ylabel('EN->RO accuracy drop')\n"
-                     "ax.legend(fontsize=8); ax.set_title('H1a/H1b: detection drop >> execution drop')\n"
-                     "fig.tight_layout(); fig.savefig(FIG_DIR / 'summary_transfer_drop.pdf'); plt.show()"),
+                     "if 'det_drop@detection' not in df.columns:\n"
+                     "    print('No linear_probes results yet (run nb02) — skipping transfer-drop figure.')\n"
+                     "else:\n"
+                     "    fig, ax = plt.subplots(figsize=(6,4))\n"
+                     "    x = np.arange(len(df)); w = 0.38\n"
+                     "    ax.bar(x-w/2, df['det_drop@detection'], w, label='detection drop @ detection band')\n"
+                     "    ax.bar(x+w/2, df['exe_drop@execution'], w, label='execution drop @ execution band')\n"
+                     "    ax.set_xticks(x); ax.set_xticklabels(df.index, rotation=15); ax.set_ylabel('EN->RO accuracy drop')\n"
+                     "    ax.legend(fontsize=8); ax.set_title('H1a/H1b: detection drop >> execution drop')\n"
+                     "    fig.tight_layout(); fig.savefig(FIG_DIR / 'summary_transfer_drop.pdf'); plt.show()"),
             ("md", "## 4. Mechanistic-vs-behavioral correlation (cross-anchor; small-n, report ρ)"),
             ("code", "from scipy.stats import spearmanr\n"
                      "# detection-band drop vs the Paper 2 behavioral RO gap per anchor (read from models.yaml baselines).\n"
