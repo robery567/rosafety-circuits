@@ -19,25 +19,24 @@ from typing import Sequence
 
 import torch
 
+from capture import chat_tokenize
+
+__all__ = ["generate_completions", "label_refusals",
+           "behavioral_labels_for_cells", "gap_exhibiting_pairs"]
+
 
 @torch.no_grad()
 def generate_completions(model, tokenizer, prompts: Sequence[str], *,
                          device: str = "cuda", batch_size: int = 8,
                          max_new_tokens: int = 256) -> list[dict]:
-    """Greedy one completion per prompt. Left-padding assumed (set
-    tokenizer.padding_side='left') so the prompt length is shared per batch."""
+    """Greedy one completion per prompt. Uses the shared ``chat_tokenize``
+    (left padding + left truncation), so the prompt length is shared per batch
+    and the assistant-generation prefix is never truncated away."""
     model.eval()
     rows: list[dict] = []
     for start in range(0, len(prompts), batch_size):
         batch = list(prompts[start:start + batch_size])
-        texts = [
-            tokenizer.apply_chat_template(
-                [{"role": "user", "content": p}],
-                tokenize=False, add_generation_prompt=True,
-            ) for p in batch
-        ]
-        enc = tokenizer(texts, return_tensors="pt", padding=True,
-                        truncation=True, max_length=1024).to(device)
+        enc = chat_tokenize(tokenizer, batch, device=device)
         gen = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False)
         prompt_len = enc["input_ids"].shape[1]
         for i in range(len(batch)):

@@ -298,6 +298,7 @@ NOTEBOOKS = [
                      "(rs / 'bands.json').write_text(json.dumps(bands, indent=2))\n"
                      "per_layer = [{'layer': l,\n"
                      "  'det_acc_en': det.per_layer[l].acc_en_held, 'det_acc_ro': det.per_layer[l].acc_ro, 'det_drop': det.per_layer[l].drop,\n"
+                     "  'det_acc_en_wilson95': list(det.per_layer[l].acc_en_held_wilson), 'det_acc_ro_wilson95': list(det.per_layer[l].acc_ro_wilson),\n"
                      "  'exe_acc_en': exe.per_layer[l].acc_en_held, 'exe_acc_ro': exe.per_layer[l].acc_ro, 'exe_drop': exe.per_layer[l].drop}\n"
                      "  for l in range(n_blocks)]\n"
                      "(rs / 'linear_probes.json').write_text(json.dumps({'anchor_model': ANCHOR, 'short': short,\n"

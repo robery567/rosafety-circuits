@@ -2,14 +2,21 @@
 
 Matches Paper 3 METHOD_DESIGN ``last_assistant_prefix`` capture point so probe
 geometry is comparable across the two papers. Uses raw forward hooks (no
-TransformerLens dependency for capture) so it runs on the exact HF checkpoints.
+TransformerLens dependency) so it runs on the exact HF checkpoints, including
+multimodal ones (Gemma-3) where the text decoder is nested under
+``language_model``.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Sequence
+from typing import Optional, Sequence
 
 import torch
+
+__all__ = [
+    "n_layers", "last_prefix_index", "chat_tokenize",
+    "capture_block_outputs", "capture_assistant_prefix",
+]
 
 
 def _decoder_blocks(model):
@@ -17,7 +24,7 @@ def _decoder_blocks(model):
 
     Qwen-2.5 / Llama-3.2 / Gemma-2 expose ``model.model.layers``. Gemma-3 4B is
     multimodal, so the text decoder is nested under a ``language_model``
-    submodule (location varies by transformers version).
+    submodule (the exact path varies by transformers version).
     """
     candidates = [
         lambda m: m.model.layers,                  # Qwen2.5, Llama3.2, Gemma2
@@ -45,13 +52,55 @@ def n_layers(model) -> int:
     return len(_decoder_blocks(model))
 
 
-@contextmanager
-def capture_block_outputs(model, store: dict):
-    """Context manager that records each block's output hidden state.
+def last_prefix_index(attention_mask: torch.Tensor) -> torch.Tensor:
+    """Index of the last non-pad token per row (the assistant-prefix position
+    when the chat template ends at the generation prompt).
 
-    On exit, ``store['hidden']`` is a list (len = n_blocks) of the *full*
-    last-forward block-output tensors. Callers slice the assistant-prefix
-    position themselves (it depends on the batch's attention mask).
+    Robust to padding side: finds the *last* position where ``mask == 1``. Under
+    left-padding (which we use) the real tokens are right-aligned, so this is
+    ``seq_len-1``; under right-padding it is ``length-1``.
+    """
+    seq_len = attention_mask.shape[1]
+    last_from_end = attention_mask.flip(1).long().argmax(dim=1)
+    return (seq_len - 1 - last_from_end).long()
+
+
+def chat_tokenize(tokenizer, prompts: Sequence[str], *, device: str = "cuda",
+                  max_len: int = 1024):
+    """Apply the chat template (+ generation prompt) and tokenize a batch.
+
+    Single source of truth for turning user prompts into model inputs, shared by
+    capture / generation / patching. Enforces the two settings that matter for
+    a causal chat decoder:
+      - ``padding_side='left'``  → correct batched generation + a shared prompt
+        length per batch.
+      - ``truncation_side='left'`` → if a prompt exceeds ``max_len`` we drop the
+        *oldest* tokens, never the assistant-generation-prompt suffix (which is
+        exactly the position we read activations from / generate at).
+    """
+    tokenizer.padding_side = "left"
+    tokenizer.truncation_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    texts = [
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": p}],
+            tokenize=False, add_generation_prompt=True,
+        )
+        for p in prompts
+    ]
+    return tokenizer(texts, return_tensors="pt", padding=True,
+                     truncation=True, max_length=max_len).to(device)
+
+
+@contextmanager
+def capture_block_outputs(model, store: dict, gather_idx: Optional[torch.Tensor] = None):
+    """Record each decoder block's output hidden state via forward hooks.
+
+    If ``gather_idx`` (one position per row) is given, only the activation at
+    that position is kept — ``store['hidden'][ℓ]`` becomes a ``(batch, d_model)``
+    bf16 CPU tensor (cheap). Otherwise the full ``(batch, seq, d_model)`` tensor
+    is kept on-device (callers slice it themselves).
     """
     blocks = _decoder_blocks(model)
     handles = []
@@ -59,9 +108,13 @@ def capture_block_outputs(model, store: dict):
 
     def make_hook(idx):
         def hook(_module, _inp, out):
-            # Decoder blocks return a tuple; hidden state is element 0.
             hs = out[0] if isinstance(out, tuple) else out
-            store["hidden"][idx] = hs.detach()
+            if gather_idx is None:
+                store["hidden"][idx] = hs.detach()
+            else:
+                rows = torch.arange(hs.size(0), device=hs.device)
+                gi = gather_idx.to(hs.device)
+                store["hidden"][idx] = hs[rows, gi].detach().to(torch.bfloat16).cpu()
         return hook
 
     try:
@@ -73,53 +126,29 @@ def capture_block_outputs(model, store: dict):
             h.remove()
 
 
-def last_prefix_index(attention_mask: torch.Tensor) -> torch.Tensor:
-    """Index of the last non-pad token per row (the assistant-prefix position
-    when the chat template ends at the generation prompt).
-
-    Robust to padding side: finds the *last* position where mask == 1. Under
-    left-padding (which we use for generation) the real tokens are right-
-    aligned, so this is seq_len-1; under right-padding it is length-1.
-    """
-    seq_len = attention_mask.shape[1]
-    # position of the last 1 in each row = (seq_len-1) - argmax of the reversed mask
-    last_from_end = attention_mask.flip(1).float().argmax(dim=1)
-    return (seq_len - 1 - last_from_end).long()
-
-
 @torch.no_grad()
 def capture_assistant_prefix(model, tokenizer, prompts: Sequence[str],
                              device: str = "cuda", batch_size: int = 8,
                              max_len: int = 1024) -> torch.Tensor:
-    """Return a (n_prompts, n_blocks, d_model) bf16 tensor of block-output
+    """Return a ``(n_prompts, n_blocks, d_model)`` bf16 tensor of block-output
     residuals at the last assistant-prefix position.
 
-    Prompts are wrapped with the model's chat template + generation prompt, so
-    the last token is exactly where the first generated token would attend from.
+    Memory-light: each block's target-position vector is gathered inside the
+    forward hook, so we never materialise full ``(b, seq, d)`` activations for
+    every block at once.
     """
+    if len(prompts) == 0:
+        raise ValueError("capture_assistant_prefix: empty prompt list.")
     model.eval()
     all_rows = []
     for start in range(0, len(prompts), batch_size):
         batch = list(prompts[start:start + batch_size])
-        texts = [
-            tokenizer.apply_chat_template(
-                [{"role": "user", "content": p}],
-                tokenize=False, add_generation_prompt=True,
-            )
-            for p in batch
-        ]
-        enc = tokenizer(texts, return_tensors="pt", padding=True,
-                        truncation=True, max_length=max_len).to(device)
+        enc = chat_tokenize(tokenizer, batch, device=device, max_len=max_len)
+        idx = last_prefix_index(enc["attention_mask"])               # (b,) on enc device
         store: dict = {}
-        with capture_block_outputs(model, store):
+        with capture_block_outputs(model, store, gather_idx=idx):
             model(**enc)
-        idx = last_prefix_index(enc["attention_mask"]).to(device)  # (b,)
-        # Stack per-block last-position vectors -> (n_blocks, b, d_model)
-        per_block = []
-        for hs in store["hidden"]:
-            gathered = hs[torch.arange(hs.size(0), device=device), idx]  # (b, d)
-            per_block.append(gathered.to(torch.bfloat16).cpu())
-        # -> (b, n_blocks, d_model)
-        all_rows.append(torch.stack(per_block, dim=1))
+        # store['hidden'] is a list (n_blocks) of (b, d) bf16 CPU tensors.
+        all_rows.append(torch.stack(store["hidden"], dim=1))          # (b, n_blocks, d)
         del store
     return torch.cat(all_rows, dim=0)

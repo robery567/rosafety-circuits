@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
+__all__ = ["load_gemma_scope_sae", "encode_acts", "difference_in_means_features",
+           "firing_rate", "en_ro_firing_gap"]
+
 
 def load_gemma_scope_sae(layer: int, *, width: str = "16k", l0: str = "medium",
                          device: str = "cuda",
