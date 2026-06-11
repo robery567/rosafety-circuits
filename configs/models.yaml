@@ -1,26 +1,12 @@
 # Paper 4 model registry
 #
-# Three roles:
-#   - sae_anchor:  model with pretrained SAEs (Gemma Scope) for H1e.
-#   - anchor:      cross-architecture models shared with Paper 3 (probes+patching).
-#   - judge:       behavioral refusal labeling (reused from Paper 2).
+# All three anchors are the exact Paper 3 anchors (shared selected_blocks +
+# RD-DPO adapters), so probes (H1a/b), patching (H1c) and the Paper-3 cross-
+# reference (H1d) run apples-to-apples on every model. gemma-3-4b-it doubles
+# as the SAE anchor (H1e) via Gemma Scope 2 — the Gemma 3 family SAE suite.
 #
-# All anchors have published Paper 2 behavioral baselines, so every mechanistic
-# number can be correlated against a real measured cross-lingual gap.
-
-sae_anchor:
-  - id: google/gemma-2-2b-it
-    short: gemma-2-2b
-    family: gemma2
-    params: 2B
-    n_blocks: 26
-    # Gemma Scope JumpReLU SAEs — pretrained, all layers. No SAE training cost.
-    sae:
-      repo_pt: google/gemma-scope-2b-pt-res     # base-model residual SAEs (all layers)
-      repo_it: google/gemma-scope-2b-it-res     # instruction-tuned (verify coverage week 1)
-      hook: resid_post
-      width: 16k                                 # default; ablate a second width in nb04
-    paper2_gap: {ro_refusal: 0.31, en_refusal: 0.93}   # placeholder — confirm from Paper 2 results
+#   - anchor: full method sweep (probes + patching + H1d).
+#   - judge:  behavioral refusal labeling (reused from Paper 2).
 
 anchors:
   - id: Qwen/Qwen2.5-3B-Instruct
@@ -38,6 +24,25 @@ anchors:
     n_blocks: 28
     paper2_baseline: {tox: 0.161, jb: 0.237, xl: 0.160}
     paper3_probe: ../paper3-alignment/data/probes/llama-3.2-3b/selected_blocks.json
+
+  - id: google/gemma-3-4b-it
+    short: gemma-3-4b
+    family: gemma3
+    params: 4B
+    n_blocks: 34            # verify on load (config.num_hidden_layers)
+    paper2_baseline: {tox: 0.349, jb: 0.505, xl: 0.210}
+    paper3_probe: ../paper3-alignment/data/probes/gemma-3-4b/selected_blocks.json
+    # SAE anchor (H1e): Gemma Scope 2 (Lieberum et al.; Gemma 3 family).
+    # `_all` folders carry SAEs for EVERY layer (reduced width/L0 set); the
+    # plain `resid_post` folder has 4 layers (25/50/65/85% depth) with the full
+    # width range. We iterate band layers, so we use the `_all` release.
+    sae:
+      release_it: gemma-scope-2-4b-it-resid_post_all
+      release_pt: gemma-scope-2-4b-pt-resid_post_all
+      site: resid_post
+      width: "16k"          # 16k/64k/256k/1m on subset folders; verify combos in _all
+      l0: medium            # small/medium/large
+      sae_id_format: "layer_{layer}_width_{width}_l0_{l0}"
 
 # Behavioral refusal judge — match Paper 2/3 exactly for cross-paper consistency.
 judge:

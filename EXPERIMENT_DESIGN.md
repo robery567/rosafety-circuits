@@ -9,7 +9,7 @@
 
 ## 1. Notation
 
-- `M` — instruction-tuned anchor model (Gemma-2-2b-it, Qwen-2.5-3B-Instruct,
+- `M` — instruction-tuned anchor model (Gemma-3-4b-it, Qwen-2.5-3B-Instruct,
   Llama-3.2-3B-Instruct). Frozen for all headline analyses.
 - `B` — number of transformer blocks in `M`.
 - `h_ℓ(x)` — residual-stream activation at the **output of block `ℓ`**, read at
@@ -157,9 +157,11 @@ Decided week 1 (plan §13.2).
 ## 6. SAE feature analysis (Gemma anchor only — H1e)
 
 ### 6.1 SAEs
-Gemma Scope JumpReLU residual SAEs for `gemma-2-2b` (Lieberum et al. 2024),
-per layer, loaded via `sae_lens`. Use the `-it` SAEs if they cover the needed
-layers; else `-pt` with a documented caveat (plan §13.1).
+Gemma Scope 2 JumpReLU residual SAEs for `gemma-3-4b-it` (Gemma 3 family),
+loaded via `sae_lens` from `gemma-scope-2-4b-it-resid_post_all` (an SAE for
+every layer; `sae_id = layer_{L}_width_{W}_l0_{small|medium|large}`). Use the
+`-it` release; fall back to the 4-depth `resid_post` subset or the `-pt`
+release with a documented caveat (plan §13.1).
 
 ### 6.2 Feature classes
 - **Detection features:** SAE latents whose activation separates `harm_en` from
@@ -175,7 +177,7 @@ prompts. H1e: detection features under-fire on RO in the detection band;
 refusal features fire comparably (conditional on detection firing).
 
 ### 6.4 SAE robustness ablation
-Repeat with a second Gemma Scope width / L0 setting. Conclusion (direction of
+Repeat with a second Gemma Scope 2 width / L0 setting. Conclusion (direction of
 the EN-vs-RO firing gap) must survive (plan §8).
 
 ## 7. Paper 3 cross-reference (H1d)
@@ -206,13 +208,13 @@ Outcomes both publishable:
 
 ```json
 {
-  "anchor_model": "google/gemma-2-2b-it",
-  "short": "gemma-2-2b",
+  "anchor_model": "google/gemma-3-4b-it",
+  "short": "gemma-3-4b",
   "analysis": "linear_probes",
-  "n_blocks": 26,
+  "n_blocks": 34,
   "capture_position": "last_assistant_prefix",
   "probe_family": "logreg",
-  "bands": {"detection": [3, 4, 5, 6, 7, 8], "execution": [14, 15, 16, 17, 18, 19, 20]},
+  "bands": {"detection": [6, 7, 8, 9, 10, 11], "execution": [20, 21, 22, 23, 24, 25, 26]},
   "per_layer": [
     {"layer": 0, "det_acc_en": 0.61, "det_acc_ro": 0.55, "det_drop": 0.06,
      "exe_acc_en": 0.58, "exe_acc_ro": 0.56, "exe_drop": 0.02,
@@ -228,7 +230,7 @@ Outcomes both publishable:
 Patching result schema:
 ```json
 {
-  "anchor_model": "google/gemma-2-2b-it",
+  "anchor_model": "google/gemma-3-4b-it",
   "analysis": "activation_patching",
   "n_pairs_gap_exhibiting": 41,
   "per_layer": [
@@ -264,10 +266,11 @@ Following Paper 2/3 discipline:
 5. **Judge confounding.** Same `gpt-5-mini` labels behavior here and in Paper 2.
    Mitigation: κ vs `claude-opus-4.5` second-rater on a stratified 200-sample;
    cross-paper consistency.
-6. **Base/it mismatch for Gemma (Scope is pt-trained).** Mitigation: prefer
-   `-it` SAEs; if using `-pt`, run probes/patching on `-it` and SAEs on `-pt`
-   with the caveat stated; the two need not be the same model for H1e to
-   corroborate a direction-of-effect already shown causally on `-it`.
+6. **Base/it SAE availability for Gemma.** Gemma Scope 2 ships both `-pt` and
+   `-it` SAEs for the Gemma 3 family, so H1e runs on the same `gemma-3-4b-it`
+   used everywhere else — no base/it mismatch. If the `-it` `_all` release is
+   thin for some layers, fall back to the 4-depth subset or `-pt` with a noted
+   caveat; the direction-of-effect is what H1e corroborates.
 
 ## 11. Pre-registration
 

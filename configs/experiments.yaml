@@ -44,11 +44,14 @@ patching:
   seeds: [17, 1729, 65537]
 
 sae:
-  enabled_for: [gemma-2-2b]    # H1e is Gemma-only (corroboration)
+  enabled_for: [gemma-3-4b]    # H1e — Gemma Scope 2 (Gemma 3 family); corroboration
+  release_it: gemma-scope-2-4b-it-resid_post_all
   top_features_per_class: 50
   separation_metric: difference_in_means
   firing_threshold: 0.0        # JumpReLU is already thresholded
-  width_ablation: [16k, 65k]   # conclusion must survive width choice
+  width: "16k"                 # 16k/64k/256k/1m; verify combos in the _all release
+  l0: medium                   # small/medium/large
+  width_ablation: ["16k", "64k"]   # conclusion must survive width choice
 
 paper3_crossref:
   selected_blocks:

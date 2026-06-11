@@ -57,12 +57,13 @@ low-resource, Romanian setting:
 
 | Role | Model | Why |
 |------|-------|-----|
-| **SAE anchor** | `google/gemma-2-2b-it` | Pretrained **Gemma Scope** SAEs on every layer — no SAE training cost. |
-| **Cross-arch anchor** | `Qwen/Qwen2.5-3B-Instruct` | Shared with Paper 3: has `selected_blocks.json` + RD-DPO adapters to test H1d. |
-| **Cross-arch anchor** | `meta-llama/Llama-3.2-3B-Instruct` | Shared with Paper 3: weakest Paper-2 baseline, biggest headroom. |
+| **Anchor + SAE** | `google/gemma-3-4b-it` | Paper 3 anchor (`selected_blocks` + RD-DPO adapters) **and** SAE anchor via **Gemma Scope 2** (Gemma 3 family SAEs) — no SAE training, no base-model mismatch. |
+| **Anchor** | `Qwen/Qwen2.5-3B-Instruct` | Paper 3 anchor: `selected_blocks.json` + RD-DPO adapters → tests H1d. |
+| **Anchor** | `meta-llama/Llama-3.2-3B-Instruct` | Paper 3 anchor: weakest Paper-2 baseline, biggest headroom. |
 
-All three have published Paper 2 behavioral baselines, so every mechanistic
-number can be correlated against a real behavioral gap.
+All three are the exact Paper 3 anchors with published Paper 2 behavioral
+baselines, so every mechanistic number can be correlated against a real
+behavioral gap and the H1d cross-reference is apples-to-apples on all three.
 
 ## Quick start
 

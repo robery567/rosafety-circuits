@@ -30,13 +30,15 @@ def data_dirs(root: Path = DRIVE_ROOT) -> dict[str, Path]:
 
 
 # --- Anchor short-name registry (kept in sync with configs/models.yaml).
+# All three are the exact Paper 3 anchors; gemma-3-4b-it doubles as the SAE
+# anchor via Gemma Scope 2 (Gemma 3 family SAEs).
 _SHORT = {
-    "google/gemma-2-2b-it": "gemma-2-2b",
+    "google/gemma-3-4b-it": "gemma-3-4b",
     "Qwen/Qwen2.5-3B-Instruct": "qwen2.5-3b",
     "meta-llama/Llama-3.2-3B-Instruct": "llama-3.2-3b",
 }
 _FAMILY = {
-    "google/gemma-2-2b-it": "gemma2",
+    "google/gemma-3-4b-it": "gemma3",
     "Qwen/Qwen2.5-3B-Instruct": "qwen2.5",
     "meta-llama/Llama-3.2-3B-Instruct": "llama",
 }

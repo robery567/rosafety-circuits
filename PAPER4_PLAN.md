@@ -77,8 +77,8 @@ This decomposes into five falsifiable sub-claims, ordered by importance:
    pipeline) closes more of the gap than Paper 3's execution-band selection,
    or — if it also fails — shows the deficit is not repairable by LoRA at this
    data budget (still a clean mechanistic finding).
-5. **H1e — SAE features corroborate the split.** Using Gemma Scope SAEs on
-   `gemma-2-2b-it`, harmfulness-detection features fire markedly less on
+5. **H1e — SAE features corroborate the split.** Using Gemma Scope 2 SAEs on
+   `gemma-3-4b-it`, harmfulness-detection features fire markedly less on
    Romanian harmful prompts than on English ones in detection-band layers,
    while refusal-execution features fire comparably once detection fires.
 
@@ -113,16 +113,19 @@ failed-intervention artefact that Paper 3 hands us.
 
 | Role | Model | Params | Why |
 |------|-------|--------|-----|
-| **SAE anchor** | `google/gemma-2-2b-it` | 2B | **Gemma Scope** ships pretrained JumpReLU SAEs on every layer/sublayer of Gemma-2-2B (Lieberum et al. 2024). H1e needs SAEs; this gives them for free — no SAE training. |
-| **Cross-arch anchor** | `Qwen/Qwen2.5-3B-Instruct` | 3B | Shared Paper 3 anchor. Has `selected_blocks.json` + RD-DPO adapters → directly tests H1d. |
-| **Cross-arch anchor** | `meta-llama/Llama-3.2-3B-Instruct` | 3B | Shared Paper 3 anchor. Weakest Paper-2 baseline, biggest behavioral gap to localize. |
+| **Anchor + SAE** | `google/gemma-3-4b-it` | 4B | Paper 3's Gemma anchor (`selected_blocks` + RD-DPO adapters) **and** the SAE anchor: **Gemma Scope 2** (Lieberum et al.) ships pretrained SAEs + transcoders for the whole Gemma 3 family, every layer, `pt` and `it`. H1e gets SAEs for free with **no base-model mismatch**. |
+| **Anchor** | `Qwen/Qwen2.5-3B-Instruct` | 3B | Paper 3 anchor. `selected_blocks.json` + RD-DPO adapters → directly tests H1d. |
+| **Anchor** | `meta-llama/Llama-3.2-3B-Instruct` | 3B | Paper 3 anchor. Weakest Paper-2 baseline, biggest behavioral gap to localize. |
 
 Notes:
-- Gemma-2-2b-it (not Gemma-3-4b-it, Paper 3's anchor) is chosen as the SAE
-  anchor *because* Gemma Scope exists for it. We accept a small base-model
-  mismatch with Paper 3 here and flag it; the probe + patching analyses
-  (H1a-d) still run on the two exact Paper-3 anchors (Qwen, Llama), so the
-  cross-paper link is preserved on those two.
+- **All three anchors are the exact Paper 3 anchors.** Gemma Scope 2 (released
+  for the Gemma 3 family) lets us use `gemma-3-4b-it` as the SAE anchor, so the
+  earlier Gemma-2 base-model mismatch is gone: probes (H1a/b), patching (H1c),
+  and the Paper-3 cross-reference (H1d) are apples-to-apples on every model,
+  and H1e (SAEs) lands on the same Gemma anchor.
+- Gemma Scope 2's `resid_post_all` release carries an SAE for every layer (a
+  reduced width/L0 set vs the 4-depth subset); we iterate band layers, so we
+  use `_all`. Verify available (width, l0) combos at run time (§13.1).
 - All three are small enough to run full forward passes with hooks on a single
   A100-40G with room for the reference (English) pass cached.
 - No model receives gradient training in the headline analyses. The only
@@ -197,7 +200,7 @@ behavioral number can be matched same-prompt/same-judge across the two papers
   triggers refusal"); (c) random-direction patch of matched norm.
 
 ### 6.4 SAE features (Gemma anchor only)
-- Load Gemma Scope `gemma-scope-2b-it`/`-pt-res` SAEs per layer.
+- Load Gemma Scope 2 `gemma-scope-2-4b-it-resid_post_all` SAEs per band layer.
 - Identify candidate **detection features** (fire on harmful, not benign,
   in EN) and **refusal features** (fire on refusal generations) via
   difference-in-means over SAE activations, with auto-interp labels.
@@ -270,9 +273,9 @@ behavioral number can be matched same-prompt/same-judge across the two papers
 | Risk | Likelihood | Mitigation |
 |------|------------|------------|
 | Detection and execution bands overlap / aren't cleanly separable | Medium | Report the continuous per-layer curves regardless; the claim degrades gracefully to "the gap is more upstream than Paper 3's selection" even without a crisp boundary. |
-| Patching is noisy at this model scale (3B) | Medium | Gemma-2-2b SAEs + denoising/noising patch variants (Heimersheim & Nanda 2024); bootstrap CIs; the three controls in §6.3. |
+| Patching is noisy at this model scale (3-4B) | Medium | denoising/noising patch variants (Heimersheim & Nanda 2024); bootstrap CIs; the three controls in §6.3. |
 | H1a fails: detection probes transfer fine | Low-Medium | Then the gap is in execution or in tokenization/representation upstream of detection — pivot to "the gap is pre-detection (embedding/early-layer)" which is *also* a clean finding and still explains Paper 3. |
-| Gemma Scope SAE conclusions don't generalize to Qwen/Llama (no SAEs there) | Medium | H1e is explicitly Gemma-only and framed as corroboration; H1a-d (probes+patching) carry the cross-arch claim and run on all three. |
+| Gemma Scope 2 SAE conclusions don't generalize to Qwen/Llama (no SAEs there) | Medium | H1e is explicitly Gemma-only and framed as corroboration; H1a-d (probes+patching) carry the cross-arch claim and run on all three. |
 | Reviewer: "probes are correlational, not causal" | Certain | That is exactly why H1c (activation patching) is load-bearing and H1a/H1b are framed as setup. Lead with the causal result. |
 | Reviewer: "n=3 models is thin for a mechanistic claim" | High | Three architectures (Gemma/Qwen/Llama) is standard for this sub-field (Arditi 2024, Zhao 2025 use comparable counts); the scaling is over *layers*, not models; behavioral anchoring strengthens external validity. |
 | Reviewer: "Romanian is arbitrary; why not a standard MI language?" | Medium | The whole point: RO is where we *have a measured gap and a failed intervention* (Papers 2-3). Generic-language MI cannot make the Paper-3 explanation claim. Frame RO as the controlled probe, not a limitation. |
@@ -321,11 +324,14 @@ mechanistic paper; only the headline noun changes.
 
 ## 13. Open questions (resolve in week 1)
 
-1. **SAE anchor confirmation.** Verify Gemma Scope `-it` residual SAEs cover
-   all layers we need on `gemma-2-2b-it` (vs only `-pt` base). If `-it` SAEs
-   are sparse, run H1e on the base model and note the it/pt caveat.
+1. **SAE release confirmation.** Verify the Gemma Scope 2
+   `gemma-scope-2-4b-it-resid_post_all` release exists and which (width, l0)
+   combos it carries for *every* layer (the `_all` folders carry a reduced set
+   vs the 4-depth subset). If `-it` `_all` coverage is thin, fall back to the
+   4-depth `resid_post` subset (25/50/65/85% — conveniently spans both bands)
+   or to the `-pt` release with a documented caveat.
 2. **Patching tooling.** TransformerLens vs nnsight vs raw hooks. TransformerLens
-   has the cleanest patching API but model coverage (Gemma-2, Qwen-2.5,
+   has the cleanest patching API but model coverage (Gemma-3, Qwen-2.5,
    Llama-3.2) must be confirmed for the exact checkpoints; fall back to raw
    forward hooks (Paper 3 already uses these) if coverage is thin. Decide week 1.
 3. **Band-definition procedure pre-registration.** Lock the "read bands off EN

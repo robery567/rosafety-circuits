@@ -1,7 +1,7 @@
 """Gemma Scope SAE loading + cross-lingual feature firing comparison (H1e).
 
-Gemma-only corroboration. Uses pretrained Gemma Scope JumpReLU residual SAEs
-(Lieberum et al. 2024) via ``sae_lens`` — no SAE training. We identify
+Gemma-only corroboration. Uses pretrained Gemma Scope 2 JumpReLU residual SAEs
+(Gemma 3 family) via ``sae_lens`` — no SAE training. We identify
 detection features (separate harm_en vs benign_en) and refusal features
 (separate refused vs complied prompts), then compare their firing on EN vs RO
 harmful prompts across the detection/execution bands.
@@ -11,16 +11,23 @@ from __future__ import annotations
 import numpy as np
 
 
-def load_gemma_scope_sae(layer: int, *, width: str = "16k", device: str = "cuda",
-                         release: str = "gemma-scope-2b-pt-res-canonical"):
-    """Load one Gemma Scope residual SAE (canonical) for a block. Returns the SAE.
+def load_gemma_scope_sae(layer: int, *, width: str = "16k", l0: str = "medium",
+                         device: str = "cuda",
+                         release: str = "gemma-scope-2-4b-it-resid_post_all"):
+    """Load one Gemma Scope 2 residual SAE for a Gemma-3 block. Returns the SAE.
 
-    Robust to sae_lens returning either the SAE or a (sae, cfg, sparsity) tuple.
-    Verify -it vs -pt residual coverage in week 1 (PAPER4_PLAN §13.1); the
-    canonical release covers all 26 Gemma-2-2B layers.
+    Gemma Scope 2 (Gemma 3 family) API differs from v1:
+      - release e.g. ``gemma-scope-2-4b-it-resid_post_all`` (the ``_all`` folder
+        has an SAE for every layer; the plain ``resid_post`` folder only covers
+        4 depths but with more widths).
+      - sae_id ``layer_{L}_width_{W}_l0_{small|medium|large}`` (underscores).
+      - ``from_pretrained`` returns ``(sae, cfg_dict, sparsity)``.
+
+    Verify the available (width, l0) combos for the ``_all`` release at run time
+    (PAPER4_PLAN §13.1); 16k/medium is the conservative default.
     """
     from sae_lens import SAE  # lazy: Colab only
-    sae_id = f"layer_{layer}/width_{width}/canonical"
+    sae_id = f"layer_{layer}_width_{width}_l0_{l0}"
     r = SAE.from_pretrained(release=release, sae_id=sae_id, device=device)
     sae = r[0] if isinstance(r, (tuple, list)) else r
     return sae.eval()

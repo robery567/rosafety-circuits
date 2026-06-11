@@ -103,9 +103,11 @@ print("torch:", torch.__version__)
 """
 
 CONFIG = r"""# --- Anchor selection. Re-run the notebook once per anchor. ---
-# SAE anchor (H1e available):  google/gemma-2-2b-it
-# Cross-arch anchors:          Qwen/Qwen2.5-3B-Instruct, meta-llama/Llama-3.2-3B-Instruct
-ANCHOR = "google/gemma-2-2b-it"
+# All three are the exact Paper 3 anchors (probes + patching + H1d):
+#   google/gemma-3-4b-it  (also the SAE anchor for H1e, via Gemma Scope 2)
+#   Qwen/Qwen2.5-3B-Instruct
+#   meta-llama/Llama-3.2-3B-Instruct
+ANCHOR = "google/gemma-3-4b-it"
 
 from paths import short_of, family_of
 short  = short_of(ANCHOR)
@@ -402,9 +404,9 @@ NOTEBOOKS = [
          "refusal vs compliance), and compare firing on EN vs RO harmful "
          "prompts across the bands. H1e: detection features under-fire on RO "
          "in the detection band.\n\n**Output:** "
-         "`results/gemma-2-2b/sae_features.json`."),
+         "`results/gemma-3-4b/sae_features.json`."),
         [
-            ("code", "assert short == 'gemma-2-2b', 'H1e is Gemma-only (Gemma Scope SAEs).'"),
+            ("code", "assert short == 'gemma-3-4b', 'H1e is the SAE anchor (Gemma Scope 2 / Gemma 3).'"),
             ("md", "## 1. Load cells + behavioral labels + bands; load anchor"),
             ("code", "out = CONTRAST_DIR / short\n"
                      "def _read(n): return [json.loads(l) for l in (out/f'{n}.jsonl').read_text().splitlines() if l.strip()]\n"
@@ -477,7 +479,7 @@ NOTEBOOKS = [
          "(EXPERIMENT_DESIGN §7).\n\n**Output:** "
          "`results/<short>/paper3_crossref.json`."),
         [
-            ("code", "assert short in ('qwen2.5-3b', 'llama-3.2-3b'), 'H1d uses the two shared Paper-3 anchors.'"),
+            ("code", "assert short in ('qwen2.5-3b', 'llama-3.2-3b', 'gemma-3-4b'), 'H1d uses the Paper-3 anchors.'"),
             ("md", "## 1. Band membership of Paper 3's refusal-direction blocks\n\n"
                    "H1d predicts Paper 3's `selected_blocks` (the refusal-direction top-k it trained\n"
                    "on) fall in the **execution** band, explaining why RD-DPO couldn't repair an\n"
@@ -515,8 +517,10 @@ NOTEBOOKS = [
             ("code", "def _load_safety(cond):\n"
                      "    f = PAPER3_ROOT / 'results' / f'{short}__{cond}__seed17__safety.json'\n"
                      "    return json.loads(f.read_text()) if f.exists() else None\n"
-                     "exec_dpo = _load_safety('rd-dpo-k4-bal-e6-x4')      # Paper 3's execution-band selection\n"
-                     "det_dpo  = _load_safety('rd-dpo-k4-detection')       # the confirmatory detection-band run\n"
+                     "# Paper 3's best execution-band condition differs by anchor (Gemma used e6, Qwen/Llama e6-x4).\n"
+                     "exec_cond = 'rd-dpo-k4-bal-e6' if short == 'gemma-3-4b' else 'rd-dpo-k4-bal-e6-x4'\n"
+                     "exec_dpo = _load_safety(exec_cond)                    # Paper 3's execution-band selection\n"
+                     "det_dpo  = _load_safety('rd-dpo-k4-detection')        # the confirmatory detection-band run\n"
                      "result = {'anchor_model': ANCHOR, 'short': short, 'analysis': 'paper3_crossref',\n"
                      "          'paper3_selected_k4': sel, 'bands': bands,\n"
                      "          'selected_in_execution': in_exec, 'selected_in_detection': in_det,\n"
