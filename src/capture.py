@@ -13,18 +13,36 @@ import torch
 
 
 def _decoder_blocks(model):
-    """Return the list of transformer decoder blocks for the supported anchors.
+    """Return the list of transformer decoder blocks, robust to architecture.
 
-    Gemma-2 / Qwen-2.5 / Llama-3.2 all expose ``model.model.layers``.
+    Qwen-2.5 / Llama-3.2 / Gemma-2 expose ``model.model.layers``. Gemma-3 4B is
+    multimodal, so the text decoder is nested under a ``language_model``
+    submodule (location varies by transformers version).
     """
-    base = getattr(model, "model", model)
-    layers = getattr(base, "layers", None)
-    if layers is None:
-        raise AttributeError(
-            "Could not locate decoder blocks; expected model.model.layers for "
-            "Gemma-2 / Qwen-2.5 / Llama-3.2."
-        )
-    return layers
+    candidates = [
+        lambda m: m.model.layers,                  # Qwen2.5, Llama3.2, Gemma2
+        lambda m: m.model.language_model.layers,   # Gemma3 multimodal (newer tf)
+        lambda m: m.language_model.model.layers,   # Gemma3 multimodal (older tf)
+        lambda m: m.language_model.layers,         # Gemma3 text submodule
+    ]
+    for get in candidates:
+        try:
+            layers = get(model)
+        except AttributeError:
+            continue
+        if layers is not None and len(layers) > 0:
+            return layers
+    raise AttributeError(
+        "Could not locate decoder blocks; checked model.model.layers and "
+        "language_model.* variants (Qwen/Llama/Gemma2/Gemma3)."
+    )
+
+
+def n_layers(model) -> int:
+    """Number of transformer decoder blocks. Robust to nested (multimodal)
+    configs where ``config.num_hidden_layers`` is absent (e.g. Gemma3Config,
+    where it lives under ``config.text_config``)."""
+    return len(_decoder_blocks(model))
 
 
 @contextmanager
