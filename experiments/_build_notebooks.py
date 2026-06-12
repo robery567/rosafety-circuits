@@ -48,7 +48,7 @@ drive.mount("/content/drive")
 #     end-to-end with no manual steps. Set these in Colab -> Secrets first. ---
 try:
     from google.colab import userdata
-    for _k in ("OPENROUTER_API_KEY", "HF_TOKEN"):
+    for _k in ("OPENROUTER_API_KEY", "HF_TOKEN", "AQ_ANCHOR"):
         try:
             _v = userdata.get(_k)
             if _v:
@@ -116,9 +116,13 @@ print("torch:", torch.__version__)
 CONFIG = r"""# --- Anchor selection. Re-run the notebook once per anchor. ---
 # All three are the exact Paper 3 anchors (probes + patching + H1d):
 #   google/gemma-3-4b-it  (also the SAE anchor for H1e, via Gemma Scope 2)
+#   meta-llama/Llama-3.2-3B-Instruct   (text-only; biggest cross-lingual gap)
 #   Qwen/Qwen2.5-3B-Instruct
-#   meta-llama/Llama-3.2-3B-Instruct
-ANCHOR = "google/gemma-3-4b-it"
+# Pick the anchor by EITHER editing the default below, OR (no edit needed across
+# notebooks) setting a Colab Secret `AQ_ANCHOR` to the HF id — the bootstrap
+# exports it to the env and every notebook picks it up.
+import os
+ANCHOR = os.environ.get("AQ_ANCHOR", "google/gemma-3-4b-it")
 
 from paths import short_of, family_of
 short  = short_of(ANCHOR)
