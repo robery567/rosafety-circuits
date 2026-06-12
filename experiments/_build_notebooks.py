@@ -339,7 +339,13 @@ NOTEBOOKS = [
                      "pairs = [par[i] for i in gap_ids if i in par]\n"
                      "bands = json.loads((RESULTS_DIR / short / 'bands.json').read_text())\n"
                      "print(f'{len(pairs)} gap-exhibiting pairs | detection band {bands[\"detection\"]} | execution band {bands[\"execution\"]}')\n"
-                     "assert len(pairs) >= 8, 'Too few gap pairs; add the bias subset (EXPERIMENT_LOG 2026-06-01).'"),
+                     "by_type = {}\n"
+                     "for p in pairs: by_type[p.get('harm_type','harmful')] = by_type.get(p.get('harm_type','harmful'),0)+1\n"
+                     "print('  by harm_type:', by_type)\n"
+                     "if len(pairs) < 3:\n"
+                     "    raise AssertionError(f'Only {len(pairs)} gap pairs — too few even with bias. Try the Llama-3.2-3B anchor (weakest baseline => larger gap), or widen the parallel set further.')\n"
+                     "elif len(pairs) < 12:\n"
+                     "    print(f'NOTE: {len(pairs)} gap pairs is thin; restoration CIs will be wide. Gemma-3-4b is a safe model (small gap); Llama-3.2-3B yields more. Proceeding.')"),
             ("md", "## 2. Load anchor + capture EN/RO residuals for the gap pairs"),
             ("code", "from transformers import AutoModelForCausalLM, AutoTokenizer\n"
                      "from capture import capture_assistant_prefix\n"

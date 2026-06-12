@@ -11,7 +11,7 @@ contrastive_sets:
     benign_en: {lang: en, intent: benign,  n: 250, source: "xstest_safe (benign-but-risky, matches overrefusal)"}
     harm_ro:   {lang: ro, intent: harmful, n: 100, source: "rosafetybench_toxicity+jailbreak (expected_behavior==refuse)"}
     benign_ro: {lang: ro, intent: benign,  n: 100, source: "rosafetybench_overrefusal (expected_behavior==answer)"}
-    parallel:  {lang: en_ro, intent: harmful, n: 36, source: "rosafetybench_crosslingual category==harmful", role: patching_only}
+    parallel:  {lang: en_ro, intent: harmful, n: 61, source: "rosafetybench_crosslingual category in {harmful,bias}", role: patching_only}
   balance: 0.5                 # 50/50 harm/benign within each language
   freeze: true                 # SHA-256 recorded in PREREGISTRATION.md before first causal run
   # NOTE: the crosslingual `expected_behavior` field is corrupted for benign rows

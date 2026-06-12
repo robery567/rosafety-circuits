@@ -85,20 +85,27 @@ def build_benign_ro(expanded: Path, n: int = 100, seed: int = SEED) -> list[dict
     } for r in rows]
 
 
-def build_parallel(expanded: Path) -> list[dict]:
-    """Matched EN<->RO *harmful* pairs (patching workhorse). The crosslingual set
-    mixes harmful / bias / benign. We discriminate on the ``category`` field
-    (== the id prefix), NOT ``expected_behavior``: in Paper 2's crosslingual
-    file the latter is corrupted for benign rows (22/25 benign prompts such as
-    "What is the capital of Romania?" are mislabeled 'refuse'). Keep only
-    category == 'harmful' so the patch set is unambiguous (EN should refuse)."""
+def build_parallel(expanded: Path, include_bias: bool = True) -> list[dict]:
+    """Matched EN<->RO safety-relevant pairs (patching workhorse). The
+    crosslingual set mixes harmful / bias / benign by ``category`` (== the id
+    prefix; ``expected_behavior`` is unreliable — see below). We keep the
+    safety-relevant categories (harmful, and by default bias, where EN should
+    refuse / reject the premise) so the patch pool is large enough to find
+    enough gap-exhibiting pairs. ``harm_type`` records the original category so
+    analysis can split harmful-only vs harmful+bias.
+
+    NB: ``expected_behavior`` in Paper 2's crosslingual file is corrupted for
+    benign rows (22/25 benign prompts such as "What is the capital of Romania?"
+    are mislabeled 'refuse'); we never rely on it — ``category`` is authoritative.
+    """
+    keep = {"harmful", "bias"} if include_bias else {"harmful"}
     rows = [r for r in _read_jsonl(expanded / "crosslingual.jsonl")
-            if r.get("category") == "harmful"]
+            if r.get("category") in keep]
     rows = sorted(rows, key=lambda r: r["id"])
     return [{
         "id": r["id"], "cell": "parallel", "label": "harmful",
         "text_en": r["text_en"], "text_ro": r["text_ro"],
-        "source_dim": r["dimension"], "category": r.get("category"),
+        "source_dim": r["dimension"], "harm_type": r.get("category"),
         "expected_behavior": "refuse", "source": r.get("source"),
     } for r in rows]
 

@@ -21,7 +21,7 @@ anchor directories for the offline cells.
 |------|---|--------|---------|
 | `harm_ro` | 100 | **final** | `1ca385525293ed23a6aa9e35982897433731ab73206fc5f556be44116e2611da` |
 | `benign_ro` | 100 | **final** | `1994b34a3fdb3b7c70f0cdb8e749b123e3dc9fb5df23f5a3747faf119389ced7` |
-| `parallel` | 36 | **final** | `678428760dbf61f4d2220e8346e4c5059652f8af285cbb75c070f13e0aa23ae6` |
+| `parallel` | 61 | **final** | `d0a8b8c0b6bcb9bdbbedca044c50693789932fd026af6c27e36e523c6f8e75a4` |
 | `harm_en` | 36 | core (local); HarmBench top-up pending → re-freezes on Colab | `c6ac3bc68261c87f41be53f94219274f3749fd349a94c9bbc72f7fc8bc16bf6c` |
 | `benign_en` | — | **pending** (XSTest-safe; needs `datasets` + network, built on Colab) | — |
 
@@ -31,10 +31,14 @@ anchor directories for the offline cells.
 - `benign_ro` ← RoSafetyBench `overrefusal` (100), all `expected_behavior == answer`
   (benign-but-risky-looking; the hard-negative class for harmfulness detection).
 - `parallel` / `harm_en` ← RoSafetyBench `crosslingual`, filtered on
-  **`category == "harmful"`** (36). NOT on `expected_behavior`: that field is
-  corrupted for benign crosslingual rows (22/25 benign prompts such as "What is
-  the capital of Romania?" are mislabeled `refuse`). The id-prefix (`cro_harm_`)
-  and `category` agree and are authoritative. See EXPERIMENT_LOG 2026-06-01.
+  **`category`** (NOT `expected_behavior`, which is corrupted for benign rows —
+  22/25 benign prompts such as "What is the capital of Romania?" are mislabeled
+  `refuse`). `harm_en` (probe) uses `category == "harmful"` (36, clean harmful);
+  the `parallel` *patching* pool uses `category ∈ {harmful, bias}` (61), since
+  bias probes are matched, safety-relevant EN/RO pairs and the harmful-only
+  pool (36) yielded too few gap-exhibiting pairs on safe anchors (Gemma-3-4b:
+  6/36). Each parallel row keeps `harm_type` so analysis can split harmful-only
+  vs harmful+bias. id-prefix (`cro_harm_`/`cro_bias_`) and `category` agree.
 - EN benign class = **XSTest-safe** (built on Colab) to match the
   benign-but-risky semantics of the RO `overrefusal` class, so the H1a EN→RO
   transfer measurement is not confounded by a benign-class distribution shift.
@@ -65,3 +69,6 @@ This ordering is the pre-registered defence against the circularity objection
 
 - **2026-06-01** — Offline cells frozen (`harm_ro`, `benign_ro`, `parallel`,
   `harm_en` core). Band-definition rule locked. EN cells + splits pending Colab.
+- **2026-06-01 (rev)** — `parallel` widened from harmful-only (36) to
+  harmful+bias (61) after the first Gemma-3-4b run yielded only 6 gap-exhibiting
+  pairs; new SHA recorded above. `harm_en` (probe) unchanged (clean harmful).
