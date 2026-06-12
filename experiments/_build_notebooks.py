@@ -488,7 +488,7 @@ NOTEBOOKS = [
             ("code", "import yaml\n"
                      "anchor_cfg = next(m for m in yaml.safe_load((CONFIG_DIR/'models.yaml').read_text())['anchors'] if m['short']==short)\n"
                      "sae_cfg = anchor_cfg['sae']\n"
-                     "RELEASE, WIDTH, L0 = sae_cfg['release_it'], sae_cfg['width'], sae_cfg['l0']\n"
+                     "RELEASE, WIDTH, L0 = sae_cfg['release'], sae_cfg['width'], sae_cfg['l0']\n"
                      "want = {L: f'layer_{L}_width_{WIDTH}_l0_{L0}' for L in band_layers}\n"
                      "print(f'release={RELEASE}  width={WIDTH}  l0={L0}  band_layers={band_layers}')\n"
                      "try:\n"

@@ -123,7 +123,8 @@ Notes:
   earlier Gemma-2 base-model mismatch is gone: probes (H1a/b), patching (H1c),
   and the Paper-3 cross-reference (H1d) are apples-to-apples on every model,
   and H1e (SAEs) lands on the same Gemma anchor.
-- Gemma Scope 2's `resid_post_all` release carries an SAE for every layer (a
+- Gemma Scope 2's `gemma-scope-2-4b-pt-res-all` release carries an SAE for
+  every layer (a
   reduced width/L0 set vs the 4-depth subset); we iterate band layers, so we
   use `_all`. Verify available (width, l0) combos at run time (§13.1).
 - All three are small enough to run full forward passes with hooks on a single
@@ -200,7 +201,7 @@ behavioral number can be matched same-prompt/same-judge across the two papers
   triggers refusal"); (c) random-direction patch of matched norm.
 
 ### 6.4 SAE features (Gemma anchor only)
-- Load Gemma Scope 2 `gemma-scope-2-4b-it-resid_post_all` SAEs per band layer.
+- Load Gemma Scope 2 `gemma-scope-2-4b-pt-res-all` SAEs per band layer.
 - Identify candidate **detection features** (fire on harmful, not benign,
   in EN) and **refusal features** (fire on refusal generations) via
   difference-in-means over SAE activations, with auto-interp labels.
@@ -325,7 +326,7 @@ mechanistic paper; only the headline noun changes.
 ## 13. Open questions (resolve in week 1)
 
 1. **SAE release confirmation.** Verify the Gemma Scope 2
-   `gemma-scope-2-4b-it-resid_post_all` release exists and which (width, l0)
+   `gemma-scope-2-4b-pt-res-all` release exists and which (width, l0)
    combos it carries for *every* layer (the `_all` folders carry a reduced set
    vs the 4-depth subset). If `-it` `_all` coverage is thin, fall back to the
    4-depth `resid_post` subset (25/50/65/85% — conveniently spans both bands)

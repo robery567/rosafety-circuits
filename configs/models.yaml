@@ -37,12 +37,13 @@ anchors:
     # plain `resid_post` folder has 4 layers (25/50/65/85% depth) with the full
     # width range. We iterate band layers, so we use the `_all` release.
     sae:
-      release_it: gemma-scope-2-4b-it-resid_post_all
-      release_pt: gemma-scope-2-4b-pt-resid_post_all
+      release: gemma-scope-2-4b-pt-res-all   # Gemma Scope 2, every-layer resid_post SAEs
       site: resid_post
-      width: "16k"          # 16k/64k/256k/1m on subset folders; verify combos in _all
-      l0: medium            # small/medium/large
+      width: "16k"          # -res-all carries widths {16k, 262k}
+      l0: big               # -res-all carries L0 {small, big} only (no 'medium')
       sae_id_format: "layer_{layer}_width_{width}_l0_{l0}"
+      # No -it SAEs exist for Gemma-3: these base(-pt)-trained SAEs are applied to
+      # the -it model's residual stream — a documented approximation for H1e.
 
 # Behavioral refusal judge — match Paper 2/3 exactly for cross-paper consistency.
 judge:

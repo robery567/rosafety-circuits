@@ -158,10 +158,10 @@ Decided week 1 (plan §13.2).
 
 ### 6.1 SAEs
 Gemma Scope 2 JumpReLU residual SAEs for `gemma-3-4b-it` (Gemma 3 family),
-loaded via `sae_lens` from `gemma-scope-2-4b-it-resid_post_all` (an SAE for
-every layer; `sae_id = layer_{L}_width_{W}_l0_{small|medium|large}`). Use the
-`-it` release; fall back to the 4-depth `resid_post` subset or the `-pt`
-release with a documented caveat (plan §13.1).
+loaded via `sae_lens` from `gemma-scope-2-4b-pt-res-all` (an SAE for
+every layer; `sae_id = layer_{L}_width_{W}_l0_{small|big}`, widths {16k,262k}).
+No `-it` SAEs exist for Gemma-3, so these base(-pt)-trained SAEs are applied to
+the `-it` model's residual stream (documented approximation for H1e).
 
 ### 6.2 Feature classes
 - **Detection features:** SAE latents whose activation separates `harm_en` from

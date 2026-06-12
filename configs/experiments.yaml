@@ -45,13 +45,13 @@ patching:
 
 sae:
   enabled_for: [gemma-3-4b]    # H1e — Gemma Scope 2 (Gemma 3 family); corroboration
-  release_it: gemma-scope-2-4b-it-resid_post_all
+  release: gemma-scope-2-4b-pt-res-all   # every-layer resid_post (base-pt-trained; no -it exists)
   top_features_per_class: 50
   separation_metric: difference_in_means
   firing_threshold: 0.0        # JumpReLU is already thresholded
-  width: "16k"                 # 16k/64k/256k/1m; verify combos in the _all release
-  l0: medium                   # small/medium/large
-  width_ablation: ["16k", "64k"]   # conclusion must survive width choice
+  width: "16k"                 # -res-all carries {16k, 262k}
+  l0: big                      # -res-all carries {small, big} only (no 'medium')
+  width_ablation: ["16k", "262k"]   # conclusion must survive width choice
 
 paper3_crossref:
   selected_blocks:

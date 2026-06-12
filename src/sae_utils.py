@@ -14,20 +14,20 @@ __all__ = ["load_gemma_scope_sae", "encode_acts", "difference_in_means_features"
            "firing_rate", "en_ro_firing_gap"]
 
 
-def load_gemma_scope_sae(layer: int, *, width: str = "16k", l0: str = "medium",
+def load_gemma_scope_sae(layer: int, *, width: str = "16k", l0: str = "big",
                          device: str = "cuda",
-                         release: str = "gemma-scope-2-4b-it-resid_post_all"):
+                         release: str = "gemma-scope-2-4b-pt-res-all"):
     """Load one Gemma Scope 2 residual SAE for a Gemma-3 block. Returns the SAE.
 
-    Gemma Scope 2 (Gemma 3 family) API differs from v1:
-      - release e.g. ``gemma-scope-2-4b-it-resid_post_all`` (the ``_all`` folder
-        has an SAE for every layer; the plain ``resid_post`` folder only covers
-        4 depths but with more widths).
-      - sae_id ``layer_{L}_width_{W}_l0_{small|medium|large}`` (underscores).
+    Verified against the sae_lens pretrained-SAE directory:
+      - release ``gemma-scope-2-4b-pt-res-all`` — every-layer residual_post SAEs
+        (repo ``google/gemma-scope-2-4b-pt``). There is **no -it release** for
+        Gemma-3; these base-model-trained SAEs are applied to the -it model's
+        residual stream (documented approximation for H1e corroboration).
+      - sae_id ``layer_{L}_width_{W}_l0_{small|big}``. The ``-res-all`` release
+        carries only widths {16k, 262k} and L0 {small, big} (no 'medium'/'64k';
+        those live in the 4-layer ``gemma-scope-2-4b-pt-res`` subset).
       - ``from_pretrained`` returns ``(sae, cfg_dict, sparsity)``.
-
-    Verify the available (width, l0) combos for the ``_all`` release at run time
-    (PAPER4_PLAN §13.1); 16k/medium is the conservative default.
     """
     from sae_lens import SAE  # lazy: Colab only
     sae_id = f"layer_{layer}_width_{width}_l0_{l0}"
