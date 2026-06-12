@@ -6,9 +6,10 @@ bitsandbytes>=0.44
 datasets>=3.0
 
 # Mechanistic interpretability tooling
-transformer-lens>=2.9     # activation patching / hook points (model coverage checked week 1)
-sae-lens>=4.0             # Gemma Scope SAE loading (H1e)
-nnsight>=0.3              # fallback patching interface if TransformerLens coverage is thin
+sae-lens>=4.0             # Gemma Scope 2 SAE loading (H1e, nb04 only)
+# NOTE: transformer-lens / nnsight were dropped — the capture + patching paths
+# use raw forward hooks (src/capture.py, src/patching.py), so neither is
+# imported anywhere. sae-lens pulls transformer-lens transitively when needed.
 
 # Probing + stats
 scikit-learn>=1.4         # logistic-regression probes, 5-fold CV
@@ -30,8 +31,9 @@ torchao>=0.16
 pyyaml>=6.0
 tqdm>=4.66
 jsonlines>=4.0
-matplotlib>=3.8
-seaborn>=0.13
+matplotlib>=3.8           # preinstalled on Colab; the notebooks do NOT -U it
+# (upgrading mid-session breaks the PDF backend: 'cannot import name FontPath').
+# src/paths.savefig() falls back PDF->cairo->SVG->PNG and never raises.
 
 # Experiment tracking
 wandb>=0.18

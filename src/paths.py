@@ -57,3 +57,33 @@ def short_of(model_id: str) -> str:
 
 def family_of(model_id: str) -> str:
     return _FAMILY.get(model_id, model_id.split("/")[-1].split("-")[0].lower())
+
+
+def savefig(fig, path) -> str | None:
+    """Save a matplotlib figure robustly for camera-ready use.
+
+    Tries, in order: PDF (default backend), PDF via cairo, SVG, then high-dpi
+    PNG. Never raises - the analysis JSON is always written before plotting, so
+    a matplotlib/backend hiccup (e.g. a mid-session matplotlib upgrade breaking
+    the PDF backend: "cannot import name FontPath") must not abort a run.
+    Returns the path actually written, or None.
+    """
+    base = Path(str(path)).with_suffix("")
+    last = None
+    for ext, backend in [("pdf", None), ("pdf", "cairo"), ("svg", None), ("png", None)]:
+        out = base.with_suffix(f".{ext}")
+        try:
+            kw = {"bbox_inches": "tight"}
+            if backend:
+                kw["backend"] = backend
+            if ext == "png":
+                kw["dpi"] = 600
+            fig.savefig(out, **kw)
+            if (ext, backend) != ("pdf", None):
+                tag = f" ({backend})" if backend else ""
+                print(f"[savefig] fell back to {ext}{tag}: {out.name}")
+            return str(out)
+        except Exception as e:  # noqa: BLE001
+            last = e
+    print(f"[savefig] all formats failed: {last}")
+    return None

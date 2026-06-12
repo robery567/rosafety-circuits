@@ -22,15 +22,17 @@ HERE = Path(__file__).parent
 # ---------------------------------------------------------------------------
 
 PIP = r"""%%capture
-# Pinned to requirements.txt. Wheel-only on A100 / CUDA 12; restart rarely needed.
+# Colab already ships consistent torch / matplotlib / pandas / scipy. We add
+# only what's genuinely missing or needs a newer pin. Deliberately we do NOT
+# `-U matplotlib` (upgrading it mid-session breaks the PDF backend: 'cannot
+# import name FontPath'), and we do NOT install transformer-lens / nnsight /
+# seaborn (unused). sae-lens is installed only in nb04 (the one place it's used).
 !pip install -U \
     'transformers>=4.51' \
     'accelerate>=1.1' \
     'datasets>=3.0' \
     'scikit-learn>=1.4' \
-    'transformer-lens>=2.9' \
-    'sae-lens>=4.0' \
-    python-dotenv requests huggingface_hub ipywidgets pyyaml matplotlib seaborn -q
+    python-dotenv requests huggingface_hub ipywidgets pyyaml -q
 """
 
 BOOTSTRAP = r"""import os, json, gc, sys, hashlib, subprocess
@@ -102,6 +104,7 @@ sys.path.insert(0, str(CODE_ROOT / "src"))         # paths, capture, probes, pat
 # version without needing a kernel restart.
 for _m in ("paths", "capture", "probes", "patching", "sae_utils", "contrastive", "behavioral"):
     sys.modules.pop(_m, None)
+from paths import savefig   # robust multi-format figure saver (PDF->cairo->SVG->PNG)
 
 # --- A100 sanity ---
 assert torch.cuda.is_available(), "Need a GPU runtime (A100 high-RAM)."
@@ -310,22 +313,6 @@ NOTEBOOKS = [
                      "print('wrote', rs / 'linear_probes.json')"),
             ("md", "## 6. Plot transfer-drop curves (H1a large in detection band; H1b small in execution band)"),
             ("code", "import matplotlib.pyplot as plt\n"
-                     "from pathlib import Path\n"
-                     "def save_camera_ready(fig, path_no_ext, dpi=600):\n"
-                     "    path_no_ext = Path(path_no_ext).with_suffix('')\n"
-                     "    for ext, backend in [('pdf', None), ('pdf', 'cairo'), ('svg', None), ('png', None)]:\n"
-                     "        out = path_no_ext.with_suffix(f'.{ext}')\n"
-                     "        try:\n"
-                     "            kw = {'bbox_inches': 'tight'}\n"
-                     "            if backend: kw['backend'] = backend\n"
-                     "            if ext == 'png': kw['dpi'] = dpi\n"
-                     "            fig.savefig(out, **kw)\n"
-                     "            if backend or ext != 'pdf':\n"
-                     "                print(f'[save_camera_ready] fell back to {ext}' + (f' ({backend})' if backend else '') + f': {out}')\n"
-                     "            return out\n"
-                     "        except Exception as e:\n"
-                     "            last_err = e\n"
-                     "    raise RuntimeError(f'All save methods failed; last error: {last_err}')\n"
                      "L = range(n_blocks)\n"
                      "fig, ax = plt.subplots(figsize=(8,4))\n"
                      "ax.plot(L, [p['det_drop'] for p in per_layer], label='detection EN->RO drop', marker='o', ms=3)\n"
@@ -333,7 +320,7 @@ NOTEBOOKS = [
                      "for b in bands['detection']: ax.axvspan(b-0.5, b+0.5, color='C0', alpha=0.06)\n"
                      "for b in bands['execution']: ax.axvspan(b-0.5, b+0.5, color='C1', alpha=0.06)\n"
                      "ax.set_xlabel('layer'); ax.set_ylabel('EN->RO accuracy drop'); ax.legend(); ax.set_title(f'{short}: transfer drop')\n"
-                     "fig.tight_layout(); save_camera_ready(fig, FIG_DIR / f'transfer_drop_{short}'); plt.show()"),
+                     "fig.tight_layout(); savefig(fig, FIG_DIR / f'transfer_drop_{short}.pdf'); plt.show()"),
         ],
     ),
     (
@@ -430,7 +417,7 @@ NOTEBOOKS = [
                      "    ax.scatter(ctrl_layers, [controls[k][l] for l in ctrl_layers], marker=m, label=f'ctrl:{k}')\n"
                      "ax.set_xlabel('patch layer'); ax.set_ylabel('refusal rate after patch'); ax.legend(fontsize=8)\n"
                      "ax.set_title(f'{short}: RO<-EN restoration (peak L{peak[\"layer\"]}, {peak_band})')\n"
-                     "fig.tight_layout(); fig.savefig(FIG_DIR / f'restoration_{short}.pdf'); plt.show()"),
+                     "fig.tight_layout(); savefig(fig, FIG_DIR / f'restoration_{short}.pdf'); plt.show()"),
         ],
     ),
     (
@@ -444,6 +431,10 @@ NOTEBOOKS = [
          "in the detection band.\n\n**Output:** "
          "`results/gemma-3-4b/sae_features.json`."),
         [
+            ("code", "# sae-lens is needed only here (H1e). It pulls transformer-lens and may bump\n"
+                     "# matplotlib — the shared savefig() helper is PDF-then-PNG safe, so plotting\n"
+                     "# below won't crash even if the PDF backend gets skewed.\n"
+                     "!pip install -U sae-lens -q"),
             ("code", "assert short == 'gemma-3-4b', 'H1e is the SAE anchor (Gemma Scope 2 / Gemma 3).'"),
             ("md", "## 1. Load cells + behavioral labels + bands; load anchor"),
             ("code", "out = CONTRAST_DIR / short\n"
@@ -528,7 +519,7 @@ NOTEBOOKS = [
                      "for b in bands['detection']: ax.axvspan(b-0.5, b+0.5, color='C0', alpha=0.06)\n"
                      "ax.set_xlabel('layer'); ax.set_ylabel('EN minus RO firing rate'); ax.legend(fontsize=8)\n"
                      "ax.set_title(f'{short}: SAE feature firing (H1e)')\n"
-                     "fig.tight_layout(); fig.savefig(FIG_DIR / f'sae_firing_{short}.pdf'); plt.show()"),
+                     "fig.tight_layout(); savefig(fig, FIG_DIR / f'sae_firing_{short}.pdf'); plt.show()"),
         ],
     ),
     (
@@ -640,7 +631,7 @@ NOTEBOOKS = [
                      "    ax.bar(x+w/2, df['exe_drop@execution'], w, label='execution drop @ execution band')\n"
                      "    ax.set_xticks(x); ax.set_xticklabels(df.index, rotation=15); ax.set_ylabel('EN->RO accuracy drop')\n"
                      "    ax.legend(fontsize=8); ax.set_title('H1a/H1b: detection drop >> execution drop')\n"
-                     "    fig.tight_layout(); fig.savefig(FIG_DIR / 'summary_transfer_drop.pdf'); plt.show()"),
+                     "    fig.tight_layout(); savefig(fig, FIG_DIR / 'summary_transfer_drop.pdf'); plt.show()"),
             ("md", "## 4. Mechanistic-vs-behavioral correlation (cross-anchor; small-n, report ρ)"),
             ("code", "from scipy.stats import spearmanr\n"
                      "# detection-band drop vs the Paper 2 behavioral RO gap per anchor (read from models.yaml baselines).\n"
