@@ -310,6 +310,22 @@ NOTEBOOKS = [
                      "print('wrote', rs / 'linear_probes.json')"),
             ("md", "## 6. Plot transfer-drop curves (H1a large in detection band; H1b small in execution band)"),
             ("code", "import matplotlib.pyplot as plt\n"
+                     "from pathlib import Path\n"
+                     "def save_camera_ready(fig, path_no_ext, dpi=600):\n"
+                     "    path_no_ext = Path(path_no_ext).with_suffix('')\n"
+                     "    for ext, backend in [('pdf', None), ('pdf', 'cairo'), ('svg', None), ('png', None)]:\n"
+                     "        out = path_no_ext.with_suffix(f'.{ext}')\n"
+                     "        try:\n"
+                     "            kw = {'bbox_inches': 'tight'}\n"
+                     "            if backend: kw['backend'] = backend\n"
+                     "            if ext == 'png': kw['dpi'] = dpi\n"
+                     "            fig.savefig(out, **kw)\n"
+                     "            if backend or ext != 'pdf':\n"
+                     "                print(f'[save_camera_ready] fell back to {ext}' + (f' ({backend})' if backend else '') + f': {out}')\n"
+                     "            return out\n"
+                     "        except Exception as e:\n"
+                     "            last_err = e\n"
+                     "    raise RuntimeError(f'All save methods failed; last error: {last_err}')\n"
                      "L = range(n_blocks)\n"
                      "fig, ax = plt.subplots(figsize=(8,4))\n"
                      "ax.plot(L, [p['det_drop'] for p in per_layer], label='detection EN->RO drop', marker='o', ms=3)\n"
@@ -317,7 +333,7 @@ NOTEBOOKS = [
                      "for b in bands['detection']: ax.axvspan(b-0.5, b+0.5, color='C0', alpha=0.06)\n"
                      "for b in bands['execution']: ax.axvspan(b-0.5, b+0.5, color='C1', alpha=0.06)\n"
                      "ax.set_xlabel('layer'); ax.set_ylabel('EN->RO accuracy drop'); ax.legend(); ax.set_title(f'{short}: transfer drop')\n"
-                     "fig.tight_layout(); fig.savefig(FIG_DIR / f'transfer_drop_{short}.pdf'); plt.show()"),
+                     "fig.tight_layout(); save_camera_ready(fig, FIG_DIR / f'transfer_drop_{short}'); plt.show()"),
         ],
     ),
     (
