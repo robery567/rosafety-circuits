@@ -431,10 +431,23 @@ NOTEBOOKS = [
          "in the detection band.\n\n**Output:** "
          "`results/gemma-3-4b/sae_features.json`."),
         [
-            ("code", "# sae-lens is needed only here (H1e). It pulls transformer-lens and may bump\n"
-                     "# matplotlib — the shared savefig() helper is PDF-then-PNG safe, so plotting\n"
-                     "# below won't crash even if the PDF backend gets skewed.\n"
-                     "!pip install -U sae-lens -q"),
+            ("code", "# sae-lens is needed only here (H1e). Install WITHOUT -U: the -U flag\n"
+                     "# upgrades torch to latest and breaks the torch/torchvision ABI match\n"
+                     "# ('operator torchvision::nms does not exist' when transformers loads the\n"
+                     "# multimodal Gemma-3 class). No -U keeps Colab's matched torch+torchvision.\n"
+                     "!pip install -q sae-lens"),
+            ("code", "# Consistency guard. If this raises, the torch/torchvision pair is skewed\n"
+                     "# (a prior `-U sae-lens` in this session). Do Runtime -> Restart session and\n"
+                     "# re-run nb04 from the top: the no-U install above keeps Colab's torch.\n"
+                     "import torch\n"
+                     "try:\n"
+                     "    import torchvision\n"
+                     "    _ = torchvision.ops.nms(torch.zeros((1, 4)), torch.zeros((1,)), 0.5)\n"
+                     "    print(f'torch {torch.__version__} + torchvision {torchvision.__version__}: OK')\n"
+                     "except Exception as e:\n"
+                     "    raise RuntimeError(\n"
+                     "        f'torch/torchvision ABI skew ({type(e).__name__}: {e}). '\n"
+                     "        'Runtime -> Restart session, then re-run nb04 from the top.')"),
             ("code", "assert short == 'gemma-3-4b', 'H1e is the SAE anchor (Gemma Scope 2 / Gemma 3).'"),
             ("md", "## 1. Load cells + behavioral labels + bands; load anchor"),
             ("code", "out = CONTRAST_DIR / short\n"

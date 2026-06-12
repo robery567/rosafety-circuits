@@ -7,9 +7,10 @@ datasets>=3.0
 
 # Mechanistic interpretability tooling
 sae-lens>=4.0             # Gemma Scope 2 SAE loading (H1e, nb04 only)
-# NOTE: transformer-lens / nnsight were dropped — the capture + patching paths
-# use raw forward hooks (src/capture.py, src/patching.py), so neither is
-# imported anywhere. sae-lens pulls transformer-lens transitively when needed.
+# Install in nb04 WITHOUT -U (`pip install sae-lens`): the -U flag upgrades
+# torch to latest and breaks the torch/torchvision ABI ('torchvision::nms does
+# not exist') so transformers can't load the multimodal Gemma-3 class.
+# transformer-lens comes in transitively; neither it nor nnsight is imported.
 
 # Probing + stats
 scikit-learn>=1.4         # logistic-regression probes, 5-fold CV
